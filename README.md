@@ -21,7 +21,7 @@ Os testes usam uma base de dados isolada e verificam autenticação, isolamento 
 
 ## Publicar na Hostinger
 
-Aplicação Express com comando de início `npm start`, Node.js **24**, sem etapa de compilação (`npm run build` é um comando vazio de preparação). O repositório inclui o ficheiro de dependências bloqueadas.
+Aplicação Express com comando de início `npm start`, Node.js **24**, com `npm run build` para validar a sintaxe do servidor. O repositório inclui o ficheiro de dependências bloqueadas.
 
 Variáveis: `NODE_ENV=production`, `PUBLIC_URL=https://menuao.online`, `TRUST_PROXY_HOPS` conforme os proxies da plataforma. O processo respeita `PORT` fornecido pelo alojamento. Se não for fornecido, usa 3000.
 
@@ -40,7 +40,7 @@ Palavras-passe protegidas com scrypt e sal individual; tokens aleatórios, guard
 ## Antes da abertura comercial
 
 - Identificar entidade operadora, WhatsApp e email de suporte e privacidade.
-- Finalizar condições e política de privacidade, prazos de retenção, exportação e eliminação de conta.
+- Finalizar condições e política de privacidade, contacto do operador e prazos de retenção. Exportação e eliminação autenticada de conta já estão implementadas.
 - Implementar recuperação de conta e verificação de email antes de aquisição pública em escala.
 - Confirmar armazenamento persistente, backups e restauro depois de um redeploy.
 - Implementar subscrições, faturação, limites e gestão interna antes de cobrar os planos.

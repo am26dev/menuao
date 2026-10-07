@@ -38,7 +38,12 @@ test('accounts, ownership, menu publication, QR and sessions',async()=>{
     assert.equal((await request('/menu/espaco-teste')).status,404);assert.equal((await request('/qr/espaco-teste')).status,404);
     assert.equal((await request('/logout','POST',{},a.cookie)).status,200);assert.equal((await request('/me','GET',undefined,a.cookie)).status,401);
     assert.equal((await request('/login','POST',{email:'first@example.test',password:'wrong'})).status,401);
-    assert.equal((await request('/login','POST',{email:'first@example.test',password:'a-test-password-123'})).status,200);
+    const relogin=await request('/login','POST',{email:'first@example.test',password:'a-test-password-123'});assert.equal(relogin.status,200);
+    const exported=await request('/account/export','GET',undefined,relogin.cookie);assert.equal(exported.data.email,'first@example.test');assert.equal(exported.data.password,undefined);assert.equal(exported.data.products.length,1);
+    assert.equal((await request('/account/delete','POST',{password:'wrong'},relogin.cookie)).status,401);
+    assert.equal((await request('/account/delete','POST',{password:'a-test-password-123'},relogin.cookie)).status,200);
+    assert.equal((await request('/me','GET',undefined,relogin.cookie)).status,401);
+    assert.equal((await request('/login','POST',{email:'first@example.test',password:'a-test-password-123'})).status,401);
     const page=await fetch(base+'/demo');assert.equal(page.status,200);assert.ok(page.headers.get('content-security-policy').includes("frame-ancestors 'none'"));
   }finally{server.kill();await new Promise(resolve=>server.once('exit',resolve));assert.ok(data.startsWith(testRoot+path.sep));rmSync(data,{recursive:true,force:true});}
 });
