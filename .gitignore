@@ -3,3 +3,6 @@ data/
 .env
 *.sqlite*
 test-data/
+
+mobile/dist/
+mobile/.expo/

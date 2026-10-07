@@ -1,0 +1,139 @@
+.console-main {
+  padding-top: 48px;
+  padding-bottom: 70px;
+  min-height: 70vh;
+}
+.console-main h1 {
+  font-size: clamp(30px, 4vw, 52px);
+  letter-spacing: -2px;
+}
+.console-main .panel {
+  margin: 24px 0;
+  padding: 28px;
+}
+.console-heading,
+.console-actions,
+.space-tabs {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.console-heading {
+  justify-content: space-between;
+}
+.space-tabs {
+  margin: 24px 0;
+}
+.subscription-banner {
+  background: #12392d;
+  color: #fff;
+  border-radius: 16px;
+  padding: 24px;
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+.subscription-banner a {
+  color: #d9f86f;
+}
+.console-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+}
+.console-stats article {
+  background: #fff;
+  border: 1px solid #d8e2db;
+  border-radius: 16px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.console-stats strong {
+  font-size: 38px;
+}
+.review-card {
+  border-top: 1px solid #d8e2db;
+  padding: 24px 0;
+}
+.review-card form {
+  max-width: 700px;
+}
+.media-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 24px;
+}
+.review-image {
+  width: 100%;
+  max-width: 300px;
+  max-height: 220px;
+  object-fit: contain;
+  border-radius: 12px;
+}
+.audit-row {
+  padding: 16px 0;
+  border-top: 1px solid #d8e2db;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+.qr-console {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+.qr-console .btn {
+  margin: 6px;
+}
+.activation {
+  max-width: 620px;
+  margin: 40px auto !important;
+}
+.console-main fieldset {
+  border: 1px solid #d8e2db;
+  border-radius: 12px;
+  padding: 16px;
+  margin: 20px 0;
+}
+.confirmation {
+  border: 2px solid #12392d !important;
+  position: relative;
+}
+.console-main input,
+.console-main select,
+.console-main textarea {
+  max-width: 100%;
+}
+.console-main .management-row {
+  flex-wrap: wrap;
+}
+.console-main p,
+.console-main span {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 600px) {
+  .console-stats {
+    grid-template-columns: 1fr;
+  }
+  .console-main .panel {
+    padding: 20px;
+  }
+  .console-main {
+    padding-top: 24px;
+  }
+  .console-main .form-grid {
+    grid-template-columns: 1fr;
+  }
+  .console-stats article {
+    padding: 16px;
+  }
+  .console-stats strong {
+    font-size: 28px;
+  }
+}
