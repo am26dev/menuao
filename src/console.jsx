@@ -922,6 +922,81 @@ function Owner({ user, refresh }) {
     </>
   );
 }
+function MailSettings() {
+  const [settings, setSettings] = useState(null),
+    [error, setError] = useState(""),
+    [busy, setBusy] = useState(false);
+  useEffect(() => {
+    api("/admin/mail")
+      .then(setSettings)
+      .catch((e) => setError(e.message));
+  }, []);
+  return (
+    <section className="panel">
+      <h2>Email de recuperação</h2>
+      <p>
+        Cria primeiro a caixa conta@menuao.online na Hostinger. A ligação usa
+        TLS e a palavra-passe fica cifrada; nunca é mostrada novamente.
+      </p>
+      <p>
+        {settings?.configured
+          ? "Envio configurado: " + settings.username
+          : "Envio ainda não configurado."}
+      </p>
+      <form
+        onSubmit={async (e) => {
+          e.preventDefault();
+          const form = e.currentTarget;
+          setBusy(true);
+          setError("");
+          try {
+            await api(
+              "/admin/mail",
+              "PUT",
+              Object.fromEntries(new FormData(form)),
+            );
+            form.reset();
+            setSettings(await api("/admin/mail"));
+            setError("Ligação SMTP verificada e guardada.");
+          } catch (e) {
+            setError(e.message);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        <Field
+          label="Email remetente da Hostinger"
+          type="email"
+          name="username"
+          defaultValue="conta@menuao.online"
+          required
+          maxLength="254"
+        />
+        <Field
+          label="Palavra-passe da caixa de email"
+          type="password"
+          name="smtpPassword"
+          autoComplete="off"
+          required
+          maxLength="256"
+        />
+        <Field
+          label="A tua palavra-passe de administrador"
+          type="password"
+          name="confirmationPassword"
+          autoComplete="current-password"
+          required
+          maxLength="128"
+        />
+        <p role="status">{error}</p>
+        <button className="btn" disabled={busy}>
+          {busy ? "A verificar…" : "Verificar e ativar envio"}
+        </button>
+      </form>
+    </section>
+  );
+}
 function Staff({ user }) {
   const confirmationRef = useRef(null);
   const [data, setData] = useState(null),
@@ -1312,6 +1387,7 @@ function Staff({ user }) {
       {tab === "users" && user.role === "admin" ? (
         <section className="panel">
           <h2>Equipa e acessos</h2>
+          <MailSettings />
           <form
             onSubmit={(e) => {
               e.preventDefault();

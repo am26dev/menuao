@@ -19,16 +19,38 @@ export function installAccountRoutes({
   plans,
   billingCycles,
   nodemailer,
+  encryptSecret,
+  decryptSecret,
+  mfaKey,
 }) {
   db.exec(
     "CREATE TABLE IF NOT EXISTS password_resets(token TEXT PRIMARY KEY,user INTEGER NOT NULL REFERENCES users(id),expires INTEGER NOT NULL)",
   );
   const origin = process.env.PUBLIC_URL || "http://localhost:3000";
-  const mail =
-    process.env.SMTP_HOST &&
-    process.env.SMTP_USER &&
-    process.env.SMTP_PASSWORD &&
-    process.env.SMTP_FROM
+  db.exec(
+    "CREATE TABLE IF NOT EXISTS mail_settings(id INTEGER PRIMARY KEY CHECK(id=1),username TEXT NOT NULL,password TEXT NOT NULL)",
+  );
+  const saved = db.prepare("SELECT * FROM mail_settings WHERE id=1").get();
+  let smtpFrom = saved?.username || process.env.SMTP_FROM;
+  let mail = saved
+    ? nodemailer.createTransport({
+        host: "smtp.hostinger.com",
+        port: 465,
+        secure: true,
+        auth: {
+          user: saved.username,
+          pass: decryptSecret(saved.password, mfaKey),
+        },
+        connectionTimeout: 8000,
+        greetingTimeout: 8000,
+        socketTimeout: 10000,
+        disableFileAccess: true,
+        disableUrlAccess: true,
+      })
+    : process.env.SMTP_HOST &&
+        process.env.SMTP_USER &&
+        process.env.SMTP_PASSWORD &&
+        process.env.SMTP_FROM
       ? nodemailer.createTransport({
           host: process.env.SMTP_HOST,
           port: Number(process.env.SMTP_PORT || 465),
@@ -47,6 +69,58 @@ export function installAccountRoutes({
       : null;
   const testOutbox =
     process.env.NODE_ENV === "test" && process.env.MAIL_TEST_OUTBOX;
+  app.get("/api/admin/mail", auth, staff, admin, (req, res) =>
+    res.json({
+      configured: !!mail,
+      username: smtpFrom || "",
+      host: "smtp.hostinger.com",
+      port: 465,
+    }),
+  );
+  app.put("/api/admin/mail", auth, staff, admin, reauth, async (req, res) => {
+    const username =
+        typeof req.body.username === "string"
+          ? req.body.username.trim().toLowerCase()
+          : "",
+      password = req.body.smtpPassword;
+    if (
+      !/^[a-z0-9._+-]+@menuao\.online$/.test(username) ||
+      typeof password !== "string" ||
+      password.length < 8 ||
+      password.length > 256
+    )
+      return fail(
+        res,
+        "Usa uma caixa @menuao.online válida e a respetiva palavra-passe.",
+      );
+    const transport = nodemailer.createTransport({
+      host: "smtp.hostinger.com",
+      port: 465,
+      secure: true,
+      auth: { user: username, pass: password },
+      connectionTimeout: 8000,
+      greetingTimeout: 8000,
+      socketTimeout: 10000,
+      disableFileAccess: true,
+      disableUrlAccess: true,
+    });
+    try {
+      await transport.verify();
+    } catch {
+      return fail(
+        res,
+        "Não foi possível autenticar no email da Hostinger. Verifica a caixa e a palavra-passe.",
+        400,
+      );
+    }
+    db.prepare(
+      "INSERT INTO mail_settings VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET username=excluded.username,password=excluded.password",
+    ).run(username, encryptSecret(password, mfaKey));
+    mail = transport;
+    smtpFrom = username;
+    audit(req, "mail.configured", username);
+    res.json({ ok: true });
+  });
   function issue(user) {
     const token = randomBytes(32).toString("hex");
     db.prepare("DELETE FROM password_resets WHERE user=? OR expires<?").run(
@@ -92,7 +166,7 @@ export function installAccountRoutes({
       );
       const reset = issue(user);
       const message = {
-        from: process.env.SMTP_FROM,
+        from: smtpFrom,
         to: user.email,
         subject: "Menu Online — alterar palavra-passe",
         text:

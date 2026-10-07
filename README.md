@@ -61,3 +61,5 @@ Login com ligação «Esqueci minha senha»; recuperação `/esqueci-senha`, red
 Configurar SMTP_HOST, SMTP_PORT (465 TLS ou 587 STARTTLS obrigatório), SMTP_USER, SMTP_PASSWORD e SMTP_FROM. Sem configuração, a interface informa que o envio está pendente e direciona para a Muds; nunca devolve o link de recuperação publicamente. A opção de outbox em ficheiro só existe em NODE_ENV=test.
 
 Ativação inicial com provisional=true impõe substituição da palavra-passe antes de qualquer operação de gestão; senha temporária válida por 48 horas. Não altera nem desativa MFA já configurado.
+
+O administrador também pode configurar a caixa @menuao.online em Gestão Muds → Equipa e acessos → Email de recuperação. A plataforma verifica a ligação TLS com smtp.hostinger.com:465 antes de guardar e cifra a senha com AES-256-GCM usando a chave MFA do servidor.

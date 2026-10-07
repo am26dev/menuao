@@ -520,6 +520,9 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
     plans,
     billingCycles,
     nodemailer,
+    encryptSecret,
+    decryptSecret,
+    mfaKey,
   });
   app.post("/api/register", rate, async (req, res) => {
     const email = clean(req.body.email, 254).toLowerCase(),
