@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import {mkdirSync,mkdtempSync,rmSync} from 'node:fs';
 import path from 'node:path';
+import jsQR from 'jsqr';
+import {PNG} from 'pngjs';
 const base='http://127.0.0.1:3101';
 test('accounts, ownership, menu publication, QR and sessions',async()=>{
   const testRoot=path.resolve('test-data');mkdirSync(testRoot,{recursive:true});
@@ -39,6 +41,7 @@ test('accounts, ownership, menu publication, QR and sessions',async()=>{
     assert.equal((await request('/space','PUT',{...space,published:true},a.cookie)).status,200);
     const publicMenu=await request('/menu/espaco-teste');assert.equal(publicMenu.status,200);assert.equal(publicMenu.data.products[0].name,product.name);assert.equal(publicMenu.data.space.owner,undefined);
     const qr=await request('/qr/espaco-teste');assert.equal(qr.status,200);assert.deepEqual([...qr.data.slice(0,8)],[137,80,78,71,13,10,26,10]);
+    const png=PNG.sync.read(Buffer.from(qr.data));assert.equal(jsQR(new Uint8ClampedArray(png.data),png.width,png.height)?.data,base+'/m/espaco-teste');
     assert.equal((await request('/space','PUT',{...space,published:false},a.cookie)).status,200);
     assert.equal((await request('/menu/espaco-teste')).status,404);assert.equal((await request('/qr/espaco-teste')).status,404);
     assert.equal((await request('/logout','POST',{},a.cookie)).status,200);assert.equal((await request('/me','GET',undefined,a.cookie)).status,401);
