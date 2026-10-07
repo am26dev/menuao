@@ -31,6 +31,11 @@ test('accounts, ownership, menu publication, QR and sessions',async()=>{
     assert.equal(owner.data.products[0].image,'');
     assert.equal((await request('/products','POST',{...product,id,name:'Alteração indevida'},b.cookie)).status,404);
     assert.equal((await request('/products/'+id,'DELETE',undefined,b.cookie)).status,404);
+    const invalidUpload=new FormData();invalidUpload.append('image',new Blob(['<svg></svg>'],{type:'image/png'}),'bad.png');assert.equal((await fetch(base+'/api/uploads',{method:'POST',headers:{Cookie:a.cookie},body:invalidUpload})).status,400);
+    const imageData=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jSSkAAAAASUVORK5CYII=','base64');
+    const form=new FormData();form.append('image',new Blob([imageData],{type:'image/png'}),'photo.png');const uploadResult=await fetch(base+'/api/uploads',{method:'POST',headers:{Cookie:a.cookie},body:form});assert.equal(uploadResult.status,200);const uploaded=await uploadResult.json();assert.ok(uploaded.url.startsWith('/uploads/'));
+    assert.equal((await fetch(base+uploaded.url)).status,200);
+    assert.equal((await request('/products','POST',{...product,id,image:uploaded.url},a.cookie)).status,200);
     assert.equal((await request('/space','PUT',{...space,published:true},a.cookie)).status,200);
     const publicMenu=await request('/menu/espaco-teste');assert.equal(publicMenu.status,200);assert.equal(publicMenu.data.products[0].name,product.name);assert.equal(publicMenu.data.space.owner,undefined);
     const qr=await request('/qr/espaco-teste');assert.equal(qr.status,200);assert.deepEqual([...qr.data.slice(0,8)],[137,80,78,71,13,10,26,10]);
@@ -42,6 +47,7 @@ test('accounts, ownership, menu publication, QR and sessions',async()=>{
     const exported=await request('/account/export','GET',undefined,relogin.cookie);assert.equal(exported.data.email,'first@example.test');assert.equal(exported.data.password,undefined);assert.equal(exported.data.products.length,1);
     assert.equal((await request('/account/delete','POST',{password:'wrong'},relogin.cookie)).status,401);
     assert.equal((await request('/account/delete','POST',{password:'a-test-password-123'},relogin.cookie)).status,200);
+    assert.equal((await fetch(base+uploaded.url)).status,404);
     assert.equal((await request('/me','GET',undefined,relogin.cookie)).status,401);
     assert.equal((await request('/login','POST',{email:'first@example.test',password:'a-test-password-123'})).status,401);
     const page=await fetch(base+'/demo');assert.equal(page.status,200);assert.ok(page.headers.get('content-security-policy').includes("frame-ancestors 'none'"));

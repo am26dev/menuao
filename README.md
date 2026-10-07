@@ -1,6 +1,6 @@
 # Menu Online
 
-Menu digital para espaços de alimentação em Angola. Marca, favicon, página comercial, demonstração, contas de estabelecimentos, produtos, categorias, preços em Kz, publicação de menus, QR Code e pedidos/reservas pelo WhatsApp.
+Menu digital para espaços de alimentação em Angola. Marca, favicon, página comercial, demonstração, contas de estabelecimentos, fotografias carregadas (JPG/PNG/WebP, até 4 MB e 100 MB por conta), produtos, categorias, preços em Kz, publicação de menus, QR Code e pedidos/reservas pelo WhatsApp.
 
 ## Executar
 
@@ -25,7 +25,7 @@ Aplicação Express com comando de início `npm start`, Node.js **24**, com `npm
 
 Variáveis: `NODE_ENV=production`, `PUBLIC_URL=https://menuao.online`, `TRUST_PROXY_HOPS` conforme os proxies da plataforma. O processo respeita `PORT` fornecido pelo alojamento. Se não for fornecido, usa 3000.
 
-`DATA_DIR` tem de apontar para armazenamento persistente fora da pasta substituída nos novos deploys. A base SQLite e os ficheiros WAL ficam nesse diretório. Executa `npm run backup` com a mesma variável DATA_DIR para criar uma cópia consistente em `DATA_DIR/backups`. Agenda uma cópia diária e testa o restauro. Faz backups consistentes com SQLite Backup API; copiar apenas o `.sqlite` enquanto há escritas pode perder dados. Não executar várias instâncias a escrever em discos diferentes. Para escalar horizontalmente, migrar para uma base centralizada.
+`DATA_DIR` tem de apontar para armazenamento persistente fora da pasta substituída nos novos deploys. A base SQLite, os ficheiros WAL e a pasta `uploads` ficam nesse diretório. Inclui também a pasta `uploads` nas cópias de segurança. Executa `npm run backup` com a mesma variável DATA_DIR para criar uma cópia consistente em `DATA_DIR/backups`. Agenda uma cópia diária e testa o restauro. Faz backups consistentes com SQLite Backup API; copiar apenas o `.sqlite` enquanto há escritas pode perder dados. Não executar várias instâncias a escrever em discos diferentes. Para escalar horizontalmente, migrar para uma base centralizada.
 
 O modo de piloto permite publicar menus sem subscrição. Os preços, limites comerciais, multiespaços e serviços assistidos apresentados na página são propostas, não funcionalidades de faturação. Não há pagamentos, comissão, stock contabilístico, entrega gerida, emails transacionais, recuperação automática de palavra-passe nem painel de administração global nesta versão.
 
