@@ -16,12 +16,18 @@
     },
     "android": {
       "package": "ao.muds.menuonline",
-      "permissions": ["CAMERA"],
+      "permissions": [
+        "CAMERA"
+      ],
       "blockedPermissions": [
         "android.permission.RECORD_AUDIO",
         "android.permission.READ_MEDIA_VIDEO",
         "android.permission.READ_MEDIA_IMAGES"
-      ]
+      ],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#12392d"
+      }
     },
     "plugins": [
       "expo-secure-store",
@@ -41,6 +47,10 @@
         }
       ]
     ],
-    "platforms": ["ios", "android"]
+    "platforms": [
+      "ios",
+      "android"
+    ],
+    "icon": "./assets/icon.png"
   }
 }
