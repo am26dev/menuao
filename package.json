@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "test": "node --test",
-    "build": "node --check server.js"
+    "build": "node --check server.js",
+    "backup": "node scripts/backup.mjs"
   },
   "engines": {
     "node": ">=24"

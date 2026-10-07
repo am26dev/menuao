@@ -1,0 +1,10 @@
+import {DatabaseSync,backup} from 'node:sqlite';
+import {mkdirSync} from 'node:fs';
+import path from 'node:path';
+const data=path.resolve(process.env.DATA_DIR||'./data');
+const destination=path.join(data,'backups');
+mkdirSync(destination,{recursive:true,mode:0o700});
+const file=path.join(destination,'menu-'+new Date().toISOString().replace(/[:.]/g,'-')+'.sqlite');
+const source=new DatabaseSync(path.join(data,'menu.sqlite'),{readOnly:true});
+await backup(source,file);source.close();
+console.log('Backup consistente criado: '+file);
