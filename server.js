@@ -24,6 +24,7 @@ import {
   decryptSecret,
 } from "./security.mjs";
 
+async function start() {
 const app = express(),
   production = process.env.NODE_ENV === "production";
 const dataDir = process.env.DATA_DIR || "./data",
@@ -1142,3 +1143,6 @@ const server = app.listen(Number(process.env.PORT || 3000), "0.0.0.0", () =>
 server.requestTimeout = 15000;
 server.headersTimeout = 10000;
 server.keepAliveTimeout = 5000;
+
+}
+start().catch(error => {console.error("Startup failed:",error.message);process.exitCode=1;});

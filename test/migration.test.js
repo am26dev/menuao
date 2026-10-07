@@ -40,7 +40,7 @@ test("Upgrade preserves legacy account, menu and products and supports a second 
     Date.now() + 60000,
   );
   db.close();
-  const server = spawn(process.execPath, ["server.js"], {
+  const server = spawn(process.execPath, ["--input-type=commonjs", "-e", "require('./server.js')"], {
     env: {
       ...process.env,
       PORT: "3102",
