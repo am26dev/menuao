@@ -48,6 +48,7 @@ function Shell({ children, user }) {
             menuonline<sup>AO</sup>
           </a>
           <span>{user?.name || user?.email || "Muds"}</span>
+          {user ? <a href="/alterar-senha">Alterar palavra-passe</a> : null}
           {user ? (
             <button
               className="btn small outline"
@@ -79,6 +80,268 @@ function Shell({ children, user }) {
     </>
   );
 }
+
+function PasswordChange({ user, required = false }) {
+  const [error, setError] = useState(""),
+    [busy, setBusy] = useState(false);
+  return (
+    <section className="panel activation">
+      <h2>
+        {required ? "Substituir senha provisória" : "Alterar palavra-passe"}
+      </h2>
+      <p>
+        {required
+          ? "Define a tua palavra-passe pessoal para continuar. A senha provisória expira em 48 horas."
+          : "A alteração termina todas as sessões. Terás de entrar novamente."}
+      </p>
+      <form
+        onSubmit={async (e) => {
+          e.preventDefault();
+          const d = Object.fromEntries(new FormData(e.currentTarget));
+          if (d.password !== d.confirm)
+            return setError("As palavras-passe não coincidem.");
+          setBusy(true);
+          setError("");
+          try {
+            await api("/account/password", "POST", d);
+            location.href = "/entrar?senha=alterada";
+          } catch (e) {
+            setError(e.message);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        <Field
+          label="Palavra-passe atual"
+          type="password"
+          name="currentPassword"
+          required
+          maxLength="128"
+          autoComplete="current-password"
+        />
+        <Field
+          label="Nova palavra-passe"
+          type="password"
+          name="password"
+          required
+          minLength="14"
+          maxLength="128"
+          autoComplete="new-password"
+        />
+        <Field
+          label="Confirmar nova palavra-passe"
+          type="password"
+          name="confirm"
+          required
+          minLength="14"
+          maxLength="128"
+          autoComplete="new-password"
+        />
+        {user.mfa_enabled ? (
+          <Field
+            label="Código de autenticação ou recuperação"
+            name="code"
+            required
+            maxLength="32"
+            autoComplete="one-time-code"
+          />
+        ) : null}
+        <p role="alert" className="form-error">
+          {error}
+        </p>
+        <button className="btn" disabled={busy}>
+          {busy ? "A guardar…" : "Guardar nova palavra-passe"}
+        </button>
+      </form>
+    </section>
+  );
+}
+function PasswordRecovery() {
+  const reset = location.pathname === "/redefinir-senha";
+  const [token] = useState(() => location.hash.slice(1));
+  const [message, setMessage] = useState(""),
+    [error, setError] = useState(""),
+    [done, setDone] = useState(false),
+    [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (reset) history.replaceState(null, "", "/redefinir-senha");
+  }, [reset]);
+  return (
+    <Shell>
+      <section className="panel activation">
+        <span className="eyebrow">ACESSO À TUA CONTA</span>
+        <h1>{reset ? "Criar nova palavra-passe." : "Esqueci minha senha."}</h1>
+        {done ? (
+          <>
+            <p role="status">{message}</p>
+            <a href="/entrar" className="btn">
+              Voltar ao login
+            </a>
+            <p>
+              <a
+                href="https://muds.ao/contacto"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Contactar a Muds
+              </a>
+            </p>
+          </>
+        ) : (
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const d = Object.fromEntries(new FormData(e.currentTarget));
+              if (reset && d.password !== d.confirm)
+                return setError("As palavras-passe não coincidem.");
+              setBusy(true);
+              setError("");
+              try {
+                const r = await api(
+                  reset ? "/password/reset" : "/password/forgot",
+                  "POST",
+                  reset ? { token, password: d.password } : d,
+                );
+                setMessage(
+                  reset
+                    ? "Palavra-passe alterada. Entra novamente com a nova senha."
+                    : r.message,
+                );
+                setDone(true);
+              } catch (e) {
+                setError(e.message);
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            {reset ? (
+              <>
+                <p>
+                  O link é válido por 30 minutos e só pode ser utilizado uma
+                  vez.
+                </p>
+                <Field
+                  label="Nova palavra-passe"
+                  type="password"
+                  name="password"
+                  minLength="14"
+                  maxLength="128"
+                  autoComplete="new-password"
+                  required
+                />
+                <Field
+                  label="Confirmar nova palavra-passe"
+                  type="password"
+                  name="confirm"
+                  minLength="14"
+                  maxLength="128"
+                  autoComplete="new-password"
+                  required
+                />
+              </>
+            ) : (
+              <>
+                <p>
+                  Indica o email registado. Receberás um link privado para
+                  alterar a palavra-passe.
+                </p>
+                <Field
+                  label="Email"
+                  type="email"
+                  name="email"
+                  autoComplete="email"
+                  required
+                  maxLength="254"
+                />
+              </>
+            )}
+            <p role="alert" className="form-error">
+              {error}
+            </p>
+            <button className="btn" disabled={busy}>
+              {busy
+                ? "A processar…"
+                : reset
+                  ? "Guardar nova palavra-passe"
+                  : "Enviar link de recuperação"}
+            </button>
+          </form>
+        )}
+      </section>
+    </Shell>
+  );
+}
+function SubscriptionChoice({ user, refresh }) {
+  const [plan, setPlan] = useState(
+      user.subscription.requested_plan || user.subscription.plan,
+    ),
+    [cycle, setCycle] = useState(
+      user.subscription.requested_cycle ||
+        user.subscription.billing_cycle ||
+        "trimestral",
+    ),
+    [message, setMessage] = useState("");
+  return (
+    <section className="panel">
+      <h2>Plano e período de assinatura</h2>
+      <p>
+        Preços mensais. O período completo é pago antecipadamente, após
+        confirmação pela equipa Muds.
+      </p>
+      <form
+        onSubmit={async (e) => {
+          e.preventDefault();
+          try {
+            await api("/account/subscription-request", "POST", {
+              plan,
+              billingCycle: cycle,
+            });
+            await refresh();
+            setMessage(
+              "Pedido registado. A equipa Muds confirmará o pagamento e a ativação.",
+            );
+          } catch (e) {
+            setMessage(e.message);
+          }
+        }}
+      >
+        <div className="form-grid">
+          <label>
+            Plano
+            <select value={plan} onChange={(e) => setPlan(e.target.value)}>
+              {Object.entries(user.plans).map(([k, p]) => (
+                <option key={k} value={k}>
+                  {p.name} · {amount(p.price)}/mês
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Período
+            <select value={cycle} onChange={(e) => setCycle(e.target.value)}>
+              {Object.entries(user.billingCycles).map(([k, c]) => (
+                <option key={k} value={k}>
+                  {c.name} · {c.months} meses
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <p>
+          <strong>
+            Total do período:{" "}
+            {amount(user.plans[plan].price * user.billingCycles[cycle].months)}
+          </strong>
+        </p>
+        <p role="status">{message}</p>
+        <button className="btn">Solicitar assinatura</button>
+      </form>
+    </section>
+  );
+}
+
 function Activation() {
   const [error, setError] = useState(""),
     [done, setDone] = useState(false),
@@ -669,7 +932,11 @@ function Staff({ user }) {
     [invite, setInvite] = useState(""),
     [editing, setEditing] = useState(null);
   useEffect(() => {
-    if (confirmation) confirmationRef.current?.scrollIntoView({behavior:'smooth',block:'center'});
+    if (confirmation)
+      confirmationRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
   }, [confirmation]);
   const can = (p) => user.role === "admin" || user.permissions.includes(p);
   async function refresh() {
@@ -694,6 +961,7 @@ function Staff({ user }) {
       setConfirmation(null);
       setEditing(null);
       if (r.activationUrl) setInvite(location.origin + r.activationUrl);
+      if (r.resetUrl) setInvite(r.resetUrl);
       await refresh();
     } catch (e) {
       setError(e.message);
@@ -761,10 +1029,11 @@ function Staff({ user }) {
       </p>
       {invite ? (
         <section className="panel">
-          <h2>Convite criado</h2>
+          <h2>Link privado criado</h2>
           <p>
-            Entrega este link apenas ao utilizador indicado. Expira em 48 horas
-            e só pode ser usado uma vez.
+            Entrega este link apenas ao titular após verificar a sua identidade.
+            Os links de recuperação expiram em 30 minutos; os convites, em 48
+            horas. Ambos são de utilização única.
           </p>
           <input aria-label="Link de ativação" value={invite} readOnly />
           <button
@@ -873,7 +1142,14 @@ function Staff({ user }) {
               <article key={u.id} className="review-card">
                 <h3>{u.email}</h3>
                 <p>
-                  {labels[u.status]} ·{" "}
+                  {labels[u.status]} · {u.billing_cycle} ·{" "}
+                  {u.requested_plan
+                    ? "Pedido: " +
+                      data.plans[u.requested_plan]?.name +
+                      " / " +
+                      u.requested_cycle
+                    : ""}{" "}
+                  ·{" "}
                   {u.ends_at
                     ? new Date(u.ends_at).toLocaleDateString("pt-AO")
                     : "Sem validade"}
@@ -886,14 +1162,17 @@ function Staff({ user }) {
                       ...d,
                       endsAt: d.end
                         ? new Date(d.end + "T23:59:59Z").getTime()
-                        : 0,
+                        : undefined,
                     });
                   }}
                 >
                   <div className="form-grid">
                     <label>
                       Plano
-                      <select name="plan" defaultValue={u.plan}>
+                      <select
+                        name="plan"
+                        defaultValue={u.requested_plan || u.plan}
+                      >
                         {Object.entries(data.plans).map(([key, p]) => (
                           <option key={key} value={key}>
                             {p.name} · {amount(p.price)} · {p.spaces} espaços
@@ -914,6 +1193,31 @@ function Staff({ user }) {
                       </select>
                     </label>
                   </div>
+                  <label>
+                    Período de assinatura
+                    <select
+                      name="billingCycle"
+                      defaultValue={
+                        u.requested_cycle || u.billing_cycle || "trimestral"
+                      }
+                    >
+                      {Object.entries(
+                        data.billingCycles || {
+                          trimestral: { name: "Trimestral" },
+                          semestral: { name: "Semestral" },
+                          anual: { name: "Anual" },
+                        },
+                      ).map(([k, c]) => (
+                        <option value={k} key={k}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <p>
+                    Deixa a validade vazia para calcular a partir de hoje pelo
+                    período escolhido. Valores mensais, sem desconto adicional.
+                  </p>
                   <Field
                     label="Válida até"
                     type="date"
@@ -1008,6 +1312,27 @@ function Staff({ user }) {
       {tab === "users" && user.role === "admin" ? (
         <section className="panel">
           <h2>Equipa e acessos</h2>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              confirmAction("/admin/password-reset", "POST", {
+                email: new FormData(e.currentTarget).get("email"),
+              });
+            }}
+          >
+            <h3>Recuperação assistida</h3>
+            <p>
+              Verifica a identidade do titular antes de entregar o link. A
+              autenticação de dois fatores mantém-se ativa.
+            </p>
+            <Field
+              label="Email ou utilizador da conta"
+              name="email"
+              required
+              maxLength="254"
+            />
+            <button className="btn small">Gerar link de recuperação</button>
+          </form>
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -1160,7 +1485,9 @@ function Console() {
   return (
     <Shell user={user}>
       {user ? (
-        user.role === "owner" ? (
+        user.must_change_password || location.pathname === "/alterar-senha" ? (
+          <PasswordChange user={user} required={!!user.must_change_password} />
+        ) : user.role === "owner" ? (
           location.pathname === "/gestao" ? (
             <>
               <h1>Gestão reservada à Muds.</h1>
@@ -1169,7 +1496,10 @@ function Console() {
               </a>
             </>
           ) : (
-            <Owner user={user} refresh={refresh} />
+            <>
+              <Owner user={user} refresh={refresh} />
+              <SubscriptionChoice user={user} refresh={refresh} />
+            </>
           )
         ) : !user.mfa_enabled ? (
           <MfaSetup api={api} onComplete={refresh} />
@@ -1191,5 +1521,11 @@ function Console() {
   );
 }
 createRoot(document.getElementById("app")).render(
-  location.pathname === "/ativar-equipa" ? <Activation /> : <Console />,
+  ["/esqueci-senha", "/redefinir-senha"].includes(location.pathname) ? (
+    <PasswordRecovery />
+  ) : location.pathname === "/ativar-equipa" ? (
+    <Activation />
+  ) : (
+    <Console />
+  ),
 );

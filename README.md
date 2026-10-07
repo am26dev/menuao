@@ -6,7 +6,7 @@ Serviço desenvolvido e gerido pela equipa Muds. Contacto oficial: https://muds.
 
 Node.js 24, Express, SQLite e painéis React. `npm ci`, `npm run build`, `npm start`. Página comercial `/`, exemplo `/demo`, estabelecimento `/painel`, equipa `/gestao`. A página comercial e o menu público preservam a interface leve existente; os painéis de gestão são React.
 
-Planos mensais: Essencial **15 000 Kz / 2 estabelecimentos**, Profissional **25 000 Kz / 5**, Multiespaços **50 000 Kz / 10**. Até 500 produtos por estabelecimento. As assinaturas são controladas manualmente pela Muds: plano, estado, validade e referência de pagamento verificado. Não há débito automático, processamento de pagamentos ou emissão fiscal de faturas.
+Planos mensais: Essencial **7 995 Kz / 2 estabelecimentos**, Profissional **14 995 Kz / 5**, Multiespaços **23 995 Kz / 10**. Assinaturas trimestrais (3 meses), semestrais (6) e anuais (12), cobradas antecipadamente pelo preço mensal sem desconto adicional. Até 500 produtos por estabelecimento. As assinaturas são controladas manualmente pela Muds: plano, estado, validade e referência de pagamento verificado. Não há débito automático, processamento de pagamentos ou emissão fiscal de faturas.
 
 Um menu e o QR só ficam públicos quando o proprietário solicita publicação, a Muds aprova o estabelecimento e a assinatura está ativa dentro da validade. Alterar nome, WhatsApp ou morada devolve o espaço à revisão. Os limites são aplicados no servidor. Uma redução de plano é bloqueada se o número de espaços ultrapassar o novo limite.
 
@@ -53,3 +53,11 @@ Inclui menu, pesquisa, carrinho, reservas, QR com câmara, acesso seguro, múlti
 ## Conteúdo e termos
 
 Pedidos/reservas não são guardados na base; são preparados no dispositivo e enviados pelo cliente no WhatsApp. O restaurante responde por preços, disponibilidade, ingredientes, alergénios, entrega e pagamento. As condições comerciais e retenção de auditoria/backups devem ser formalizadas pela Muds antes da venda em escala. Exportação e eliminação autenticadas estão disponíveis ao proprietário.
+
+## Recuperação e alteração de palavra-passe
+
+Login com ligação «Esqueci minha senha»; recuperação `/esqueci-senha`, redefinição `/redefinir-senha#token` e alteração autenticada `/alterar-senha`. Links aleatórios de 256 bits, guardados apenas como SHA-256, válidos por 30 minutos e de utilização única. Nova solicitação invalida o link anterior. Respostas públicas não revelam se a conta existe, com limite de tentativas. A alteração revoga todas as sessões e preserva o MFA. O administrador pode gerar links assistidos, após confirmação da sua senha e verificação da identidade do titular.
+
+Configurar SMTP_HOST, SMTP_PORT (465 TLS ou 587 STARTTLS obrigatório), SMTP_USER, SMTP_PASSWORD e SMTP_FROM. Sem configuração, a interface informa que o envio está pendente e direciona para a Muds; nunca devolve o link de recuperação publicamente. A opção de outbox em ficheiro só existe em NODE_ENV=test.
+
+Ativação inicial com provisional=true impõe substituição da palavra-passe antes de qualquer operação de gestão; senha temporária válida por 48 horas. Não altera nem desativa MFA já configurado.

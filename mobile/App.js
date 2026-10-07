@@ -1013,6 +1013,13 @@ function AppContent() {
                       password,
                       code,
                     });
+                    if (result.mustChangePassword) {
+                      setError(
+                        "Substitui a senha provisória no site antes de entrar na aplicação.",
+                      );
+                      await Linking.openURL(API + "/entrar");
+                      return;
+                    }
                     await SecureStore.setItemAsync(
                       "menu-session",
                       result.token,
@@ -1031,6 +1038,11 @@ function AppContent() {
                     setBusy(false);
                   }
                 }}
+              />
+              <Button
+                title="Esqueci minha senha"
+                secondary
+                onPress={() => Linking.openURL(API + "/esqueci-senha")}
               />
               <Button
                 title="Criar conta no site"
