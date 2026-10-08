@@ -290,20 +290,49 @@ export function installAccountRoutes({
     },
   );
   app.post("/api/account/subscription-request", auth, owner, (req, res) => {
-    const { plan, billingCycle } = req.body;
-    if (!plans[plan] || !billingCycles[billingCycle])
-      return fail(res, "Escolhe um plano e um período válidos.");
-    db.prepare(
-      "UPDATE subscriptions SET requested_plan=?,requested_cycle=? WHERE user=?",
-    ).run(plan, billingCycle, req.user.id);
-    audit(
-      req,
-      "subscription.requested",
-      req.user.id,
-      plan + " " + billingCycle,
-    );
+    const { plan, billingCycle } = req.body,
+      kind = req.body.kind || "new";
+    if (
+      !plans[plan] ||
+      !billingCycles[billingCycle] ||
+      !["new", "change", "renew"].includes(kind)
+    )
+      return fail(res, "Escolhe um plano, período e tipo de pedido válidos.");
+    const prior = db
+      .prepare("SELECT * FROM subscriptions WHERE user=?")
+      .get(req.user.id);
+    if (
+      prior?.request_id &&
+      prior.requested_plan === plan &&
+      prior.requested_cycle === billingCycle &&
+      prior.requested_kind === kind
+    )
+      return res.json({
+        ok: true,
+        requestId: prior.request_id,
+        total: plans[plan].price * billingCycles[billingCycle].months,
+        alreadyRequested: true,
+      });
+    const requestId = "MO-" + randomBytes(6).toString("hex").toUpperCase();
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.prepare(
+        "INSERT INTO subscriptions(user,requested_plan,requested_cycle,requested_kind,requested_at,request_id) VALUES(?,?,?,?,?,?) ON CONFLICT(user) DO UPDATE SET requested_plan=excluded.requested_plan,requested_cycle=excluded.requested_cycle,requested_kind=excluded.requested_kind,requested_at=excluded.requested_at,request_id=excluded.request_id",
+      ).run(req.user.id, plan, billingCycle, kind, Date.now(), requestId);
+      audit(
+        req,
+        "subscription.requested",
+        req.user.id,
+        requestId + " " + kind + " " + plan + " " + billingCycle,
+      );
+      db.exec("COMMIT");
+    } catch (e) {
+      db.exec("ROLLBACK");
+      throw e;
+    }
     res.json({
       ok: true,
+      requestId,
       total: plans[plan].price * billingCycles[billingCycle].months,
     });
   });

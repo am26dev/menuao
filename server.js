@@ -87,6 +87,9 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
   );
   column("subscriptions", "requested_plan", "TEXT");
   column("subscriptions", "requested_cycle", "TEXT");
+  column("subscriptions", "requested_kind", "TEXT");
+  column("subscriptions", "requested_at", "INTEGER");
+  column("subscriptions", "request_id", "TEXT");
   const billingCycles = {
     trimestral: { name: "Trimestral", months: 3 },
     semestral: { name: "Semestral", months: 6 },
@@ -812,7 +815,8 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
     const b = req.body,
       slug = clean(b.slug, 60).toLowerCase(),
       name = clean(b.name, 100),
-      whatsapp = clean(b.whatsapp, 20).replace(/[\s+()-]/g, "");
+      phone = clean(b.whatsapp, 30).replace(/[\s+()-]/g, ""),
+      whatsapp = /^\d{9}$/.test(phone) ? "244" + phone : phone;
     if (
       !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) ||
       slug === "demo" ||
@@ -981,7 +985,7 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
         all || can("subscriptions.manage")
           ? db
               .prepare(
-                "SELECT u.id,u.email,u.name,u.role,u.permissions,u.disabled,u.activated,b.plan,b.status,b.ends_at,b.reference,b.billing_cycle,b.requested_plan,b.requested_cycle FROM users u LEFT JOIN subscriptions b ON b.user=u.id ORDER BY u.id DESC LIMIT 1000",
+                "SELECT u.id,u.email,u.name,u.role,u.permissions,u.disabled,u.activated,b.plan,b.status,b.ends_at,b.reference,b.billing_cycle,b.requested_plan,b.requested_cycle,b.request_id,b.requested_kind,b.requested_at FROM users u LEFT JOIN subscriptions b ON b.user=u.id ORDER BY u.id DESC LIMIT 1000",
               )
               .all()
           : [],
@@ -1039,6 +1043,7 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
     reauth,
     (req, res) => {
       const b = req.body,
+        previous = subscription(Number(req.params.id)),
         cycle =
           b.billingCycle ||
           subscription(Number(req.params.id)).billing_cycle ||
@@ -1046,10 +1051,20 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
         ends =
           b.endsAt === undefined
             ? (() => {
-                const d = new Date();
+                const d = new Date(
+                  previous.requested_kind === "renew"
+                    ? Math.max(Date.now(), previous.ends_at || 0)
+                    : Date.now(),
+                );
+                const day = d.getUTCDate();
+                d.setUTCDate(1);
                 d.setUTCMonth(
                   d.getUTCMonth() + (billingCycles[cycle]?.months || 0),
                 );
+                const lastDay = new Date(
+                  Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0),
+                ).getUTCDate();
+                d.setUTCDate(Math.min(day, lastDay));
                 return d.getTime();
               })()
             : Number(b.endsAt),
@@ -1060,11 +1075,13 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
         !["pending", "active", "suspended", "cancelled"].includes(b.status) ||
         !Number.isSafeInteger(ends) ||
         ends < 0 ||
-        ends > Date.now() + 366 * 86400000
+        ends >
+          Date.now() +
+            (previous.requested_kind === "renew" ? 732 : 366) * 86400000
       )
         return fail(
           res,
-          "Plano, estado ou validade inválidos (máximo um ano).",
+          "Plano, estado ou validade inválidos para o período solicitado.",
         );
       if (
         b.status === "active" &&
@@ -1088,7 +1105,7 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
           409,
         );
       db.prepare(
-        "INSERT INTO subscriptions(user,plan,status,ends_at,reference,updated_at,billing_cycle) VALUES(?,?,?,?,?,?,?) ON CONFLICT(user) DO UPDATE SET plan=excluded.plan,status=excluded.status,ends_at=excluded.ends_at,reference=excluded.reference,updated_at=excluded.updated_at,billing_cycle=excluded.billing_cycle,requested_plan=NULL,requested_cycle=NULL",
+        "INSERT INTO subscriptions(user,plan,status,ends_at,reference,updated_at,billing_cycle) VALUES(?,?,?,?,?,?,?) ON CONFLICT(user) DO UPDATE SET plan=excluded.plan,status=excluded.status,ends_at=excluded.ends_at,reference=excluded.reference,updated_at=excluded.updated_at,billing_cycle=excluded.billing_cycle,requested_plan=NULL,requested_cycle=NULL,request_id=NULL,requested_kind=NULL,requested_at=NULL",
       ).run(
         id,
         b.plan,
@@ -1258,6 +1275,7 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
       "/esqueci-senha",
       "/redefinir-senha",
       "/alterar-senha",
+      "/assinatura",
       "/demo",
       "/m/:slug",
       "/privacidade",

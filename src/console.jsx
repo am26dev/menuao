@@ -274,71 +274,223 @@ function PasswordRecovery() {
   );
 }
 function SubscriptionChoice({ user, refresh }) {
-  const [plan, setPlan] = useState(
-      user.subscription.requested_plan || user.subscription.plan,
-    ),
+  const sub = user.subscription,
+    current = user.plans[sub.plan];
+  const [plan, setPlan] = useState(sub.requested_plan || sub.plan),
     [cycle, setCycle] = useState(
-      user.subscription.requested_cycle ||
-        user.subscription.billing_cycle ||
-        "trimestral",
+      sub.requested_cycle || sub.billing_cycle || "trimestral",
     ),
-    [message, setMessage] = useState("");
+    [kind, setKind] = useState("new"),
+    [editing, setEditing] = useState(
+      !sub.request_id && sub.status === "pending",
+    ),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState(""),
+    [receipt, setReceipt] = useState(null);
+  const formRef = useRef(null),
+    expired = !!sub.ends_at && sub.ends_at <= Date.now();
+  const request =
+    receipt ||
+    (sub.request_id
+      ? {
+          requestId: sub.request_id,
+          plan: sub.requested_plan,
+          billingCycle: sub.requested_cycle,
+          total:
+            user.plans[sub.requested_plan]?.price *
+            user.billingCycles[sub.requested_cycle]?.months,
+        }
+      : null);
+  function edit(action) {
+    setKind(action);
+    setEditing(true);
+    setError("");
+    if (action === "renew") {
+      setPlan(sub.plan);
+      setCycle(sub.billing_cycle || "trimestral");
+    }
+    setTimeout(
+      () =>
+        formRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "center",
+        }),
+      0,
+    );
+  }
   return (
-    <section className="panel">
-      <h2>Plano e período de assinatura</h2>
-      <p>
-        Preços mensais. O período completo é pago antecipadamente, após
-        confirmação pela equipa Muds.
-      </p>
-      <form
-        onSubmit={async (e) => {
-          e.preventDefault();
-          try {
-            await api("/account/subscription-request", "POST", {
-              plan,
-              billingCycle: cycle,
-            });
-            await refresh();
-            setMessage(
-              "Pedido registado. A equipa Muds confirmará o pagamento e a ativação.",
-            );
-          } catch (e) {
-            setMessage(e.message);
-          }
-        }}
-      >
-        <div className="form-grid">
-          <label>
-            Plano
-            <select value={plan} onChange={(e) => setPlan(e.target.value)}>
-              {Object.entries(user.plans).map(([k, p]) => (
-                <option key={k} value={k}>
-                  {p.name} · {amount(p.price)}/mês
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Período
-            <select value={cycle} onChange={(e) => setCycle(e.target.value)}>
-              {Object.entries(user.billingCycles).map(([k, c]) => (
-                <option key={k} value={k}>
-                  {c.name} · {c.months} meses
-                </option>
-              ))}
-            </select>
-          </label>
+    <>
+      <div className="console-heading">
+        <div>
+          <span className="eyebrow">A TUA CONTA</span>
+          <h1>A minha assinatura.</h1>
         </div>
+        <a className="btn outline" href="/painel">
+          Voltar aos estabelecimentos
+        </a>
+      </div>
+      <section className="panel">
+        <h2>{current.name}</h2>
         <p>
+          Estado:{" "}
           <strong>
-            Total do período:{" "}
-            {amount(user.plans[plan].price * user.billingCycles[cycle].months)}
+            {expired ? "Expirada" : labels[sub.status] || "Pendente"}
           </strong>
         </p>
-        <p role="status">{message}</p>
-        <button className="btn">Solicitar assinatura</button>
-      </form>
-    </section>
+        <p>
+          Validade:{" "}
+          <strong>
+            {sub.ends_at
+              ? new Date(sub.ends_at).toLocaleDateString("pt-AO")
+              : "Ainda sem data de ativação"}
+          </strong>
+        </p>
+        <p>
+          Período: {user.billingCycles[sub.billing_cycle || "trimestral"].name}{" "}
+          · Até {current.spaces} estabelecimentos
+        </p>
+        <div className="console-actions">
+          <button className="btn" onClick={() => edit("change")}>
+            Alterar o plano
+          </button>
+          <button className="btn outline" onClick={() => edit("renew")}>
+            Renovar assinatura
+          </button>
+        </div>
+      </section>
+      {request ? (
+        <section className="panel subscription-receipt" role="status">
+          <h2>Solicitação recebida</h2>
+          <p>
+            Referência: <strong>{request.requestId}</strong> · Aguarda
+            confirmação da equipa Muds.
+          </p>
+          <p>
+            {user.plans[request.plan]?.name} ·{" "}
+            {user.billingCycles[request.billingCycle]?.name} ·{" "}
+            <strong>{amount(request.total)}</strong>
+          </p>
+          <p>
+            O pedido está guardado e visível na gestão Muds. A equipa irá
+            confirmar as instruções de pagamento; a assinatura só será ativada
+            após verificação. A assinatura atual mantém a sua validade.
+          </p>
+        </section>
+      ) : null}
+      {editing ? (
+        <section className="panel" ref={formRef}>
+          <h2>
+            {kind === "renew"
+              ? "Renovar assinatura"
+              : kind === "change"
+                ? "Alterar o plano"
+                : "Plano e período de assinatura"}
+          </h2>
+          <p>
+            Seleciona uma das três modalidades. O valor apresentado é o total a
+            pagar pelo período.
+          </p>
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              if (busy) return;
+              setBusy(true);
+              setError("");
+              try {
+                const result = await api(
+                  "/account/subscription-request",
+                  "POST",
+                  { plan, billingCycle: cycle, kind },
+                );
+                setReceipt({ ...result, plan, billingCycle: cycle });
+                setEditing(false);
+                await refresh();
+              } catch (e) {
+                setError(e.message);
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            <div className="form-grid">
+              <label>
+                Plano
+                <select value={plan} onChange={(e) => setPlan(e.target.value)}>
+                  {Object.entries(user.plans).map(([k, p]) => (
+                    <option value={k} key={k}>
+                      {p.name} · {amount(p.price)}/mês
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Período
+                <select
+                  value={cycle}
+                  onChange={(e) => setCycle(e.target.value)}
+                >
+                  {Object.entries(user.billingCycles).map(([k, p]) => (
+                    <option value={k} key={k}>
+                      {p.name} · {p.months} meses
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <p className="subscription-total">
+              Total do período:{" "}
+              <strong>
+                {amount(
+                  user.plans[plan].price * user.billingCycles[cycle].months,
+                )}
+              </strong>
+            </p>
+            <p className="form-error" role="alert">
+              {error}
+            </p>
+            <button className="btn" disabled={busy}>
+              {busy
+                ? "A enviar solicitação…"
+                : kind === "renew"
+                  ? "Solicitar renovação"
+                  : kind === "change"
+                    ? "Solicitar alteração"
+                    : "Solicitar assinatura"}
+            </button>
+          </form>
+        </section>
+      ) : null}
+    </>
+  );
+}
+function AngolaPhone({ value = "" }) {
+  const [number, setNumber] = useState(() => String(value).replace(/^244/, ""));
+  return (
+    <label>
+      WhatsApp
+      <div className="phone-input">
+        <span aria-hidden="true">+244</span>
+        <input
+          aria-label="Número WhatsApp (9 dígitos)"
+          name="whatsapp"
+          type="tel"
+          inputMode="tel"
+          autoComplete="tel-national"
+          placeholder="936479545"
+          pattern="[0-9]{9}"
+          title="Indica os 9 dígitos do número. O indicativo +244 já está incluído."
+          required
+          value={number}
+          onChange={(e) => {
+            let n = e.target.value.replace(/[^0-9]/g, "");
+            if (n.length > 9 && n.startsWith("244")) n = n.slice(3);
+            setNumber(n);
+          }}
+          maxLength="20"
+        />
+      </div>
+      <small>Indicativo de Angola incluído · 9 dígitos</small>
+    </label>
   );
 }
 
@@ -571,7 +723,7 @@ function SpaceEditor({ space, onSaved, onCancel }) {
               id: space?.id,
               published: d.published === "on",
             });
-            onSaved();
+            await onSaved(d.slug);
           } catch (e) {
             setError(e.message);
             setBusy(false);
@@ -587,14 +739,7 @@ function SpaceEditor({ space, onSaved, onCancel }) {
             maxLength="100"
             defaultValue={space?.name}
           />
-          <Field
-            label="WhatsApp (244 + 9 dígitos)"
-            name="whatsapp"
-            required
-            pattern="244[0-9]{9}"
-            maxLength="12"
-            defaultValue={space?.whatsapp}
-          />
+          <AngolaPhone value={space?.whatsapp} />
         </div>
         <Field
           label="Endereço do menu (ex.: sabor-luanda)"
@@ -718,13 +863,7 @@ function Owner({ user, refresh }) {
               ? "Expirada"
               : labels[sub.status] || "Pendente"}
         </span>
-        <a
-          href="https://muds.ao/contacto"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Gerir assinatura com a Muds ↗
-        </a>
+        <a href="/assinatura">Gerir assinatura</a>
       </section>
       <p className="form-error" role="alert">
         {error}
@@ -748,8 +887,10 @@ function Owner({ user, refresh }) {
         <SpaceEditor
           key={editor.id || "new"}
           space={editor}
-          onSaved={async () => {
-            await refresh();
+          onSaved={async (slug) => {
+            const updated = await refresh();
+            const saved = updated.spaces.find((s) => s.slug === slug);
+            if (saved) setSelected(saved.id);
             setEditor(null);
           }}
           onCancel={() => setEditor(null)}
@@ -1216,6 +1357,17 @@ function Staff({ user }) {
             .map((u) => (
               <article key={u.id} className="review-card">
                 <h3>{u.email}</h3>
+                {u.request_id ? (
+                  <p>
+                    Solicitação {u.request_id} ·{" "}
+                    {u.requested_kind === "renew"
+                      ? "Renovação"
+                      : u.requested_kind === "change"
+                        ? "Alteração de plano"
+                        : "Adesão"}{" "}
+                    · {new Date(u.requested_at).toLocaleString("pt-AO")}
+                  </p>
+                ) : null}
                 <p>
                   {labels[u.status]} · {u.billing_cycle} ·{" "}
                   {u.requested_plan
@@ -1290,15 +1442,16 @@ function Staff({ user }) {
                     </select>
                   </label>
                   <p>
-                    Deixa a validade vazia para calcular a partir de hoje pelo
-                    período escolhido. Valores mensais, sem desconto adicional.
+                    Deixa a validade vazia para calcular pelo período escolhido.
+                    Na renovação, o prazo começa no fim da validade atual ou
+                    hoje, se já expirou.
                   </p>
                   <Field
                     label="Válida até"
                     type="date"
                     name="end"
                     defaultValue={
-                      u.ends_at
+                      u.ends_at && !u.request_id
                         ? new Date(u.ends_at).toISOString().slice(0, 10)
                         : ""
                     }
@@ -1564,7 +1717,9 @@ function Console() {
         user.must_change_password || location.pathname === "/alterar-senha" ? (
           <PasswordChange user={user} required={!!user.must_change_password} />
         ) : user.role === "owner" ? (
-          location.pathname === "/gestao" ? (
+          location.pathname === "/assinatura" ? (
+            <SubscriptionChoice user={user} refresh={refresh} />
+          ) : location.pathname === "/gestao" ? (
             <>
               <h1>Gestão reservada à Muds.</h1>
               <a href="/painel" className="btn">
@@ -1574,7 +1729,6 @@ function Console() {
           ) : (
             <>
               <Owner user={user} refresh={refresh} />
-              <SubscriptionChoice user={user} refresh={refresh} />
             </>
           )
         ) : !user.mfa_enabled ? (

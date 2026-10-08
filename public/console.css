@@ -137,3 +137,5 @@
     font-size: 28px;
   }
 }
+
+.phone-input{display:flex;align-items:center;border:1px solid var(--line);border-radius:8px;background:white;overflow:hidden}.phone-input>span{padding:13px 15px;background:#edf2e8;font-weight:700;align-self:stretch;display:flex;align-items:center}.phone-input input{border:0;border-radius:0;min-width:0;margin:0!important}.phone-input:focus-within{outline:2px solid #6f9433;outline-offset:1px}.phone-input input:focus{outline:0}.subscription-receipt{border:2px solid #8bac63;background:#f1f7e9}.subscription-total strong{display:block;font:800 34px Manrope,Arial,sans-serif;margin-top:8px}.subscription-receipt strong{overflow-wrap:anywhere}

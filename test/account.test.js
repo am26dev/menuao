@@ -58,7 +58,8 @@ test("Password recovery, temporary administrator and subscription periods", asyn
     }
     assert.ok(ready, logs);
     db = new DatabaseSync(path.join(data, "menu.sqlite"));
-    for (const page of ["/esqueci-senha", "/redefinir-senha", "/alterar-senha"]) assert.equal((await fetch(base + page)).status, 200);
+    for (const page of ["/esqueci-senha", "/redefinir-senha", "/alterar-senha"])
+      assert.equal((await fetch(base + page)).status, 200);
     await t.test(
       "Temporary password forces replacement and preserves MFA gate",
       async () => {
@@ -228,6 +229,98 @@ test("Password recovery, temporary administrator and subscription periods", asyn
               },
               admin.cookie,
               "PUT",
+            )
+          ).status,
+          400,
+        );
+      },
+    );
+    await t.test(
+      "Angola phone formats, persistent request receipt and repeat submission",
+      async () => {
+        for (const page of ["/assinatura"])
+          assert.equal((await fetch(base + page)).status, 200);
+        const payload = {
+          name: "100 MISÉRIA",
+          slug: "100miseria",
+          whatsapp: "+244 936479545",
+          address: "Talatona, Luanda",
+          description: "PIZZA | BURGER | FAHITA | SANDWICH | CARNES",
+          hours: "Terça a Domingo – 8:00 até às 22:00",
+          published: true,
+        };
+        const created = await api("/space", payload, owner.cookie, "PUT");
+        assert.equal(created.status, 200);
+        let me = await api("/me", undefined, owner.cookie, "GET"),
+          space = me.data.spaces.find((s) => s.slug === "100miseria");
+        assert.equal(space.whatsapp, "244936479545");
+        assert.equal(space.name, "100 MISÉRIA");
+        for (const phone of ["936479545", "244936479545", "+244 936 479 545"])
+          assert.equal(
+            (
+              await api(
+                "/space",
+                { ...payload, id: space.id, whatsapp: phone },
+                owner.cookie,
+                "PUT",
+              )
+            ).status,
+            200,
+          );
+        for (const phone of ["93647954", "+351936479545", "9364795455"])
+          assert.equal(
+            (
+              await api(
+                "/space",
+                { ...payload, id: space.id, whatsapp: phone },
+                owner.cookie,
+                "PUT",
+              )
+            ).status,
+            400,
+          );
+        const original = me.data.subscription.ends_at;
+        const r = await api(
+          "/account/subscription-request",
+          { plan: "essencial", billingCycle: "semestral", kind: "change" },
+          owner.cookie,
+        );
+        assert.equal(r.status, 200);
+        assert.match(r.data.requestId, /^MO-[A-F0-9]{12}$/);
+        const repeated = await api(
+          "/account/subscription-request",
+          { plan: "essencial", billingCycle: "semestral", kind: "change" },
+          owner.cookie,
+        );
+        assert.equal(repeated.data.requestId, r.data.requestId);
+        assert.equal(repeated.data.alreadyRequested, true);
+        me = await api("/me", undefined, owner.cookie, "GET");
+        assert.equal(me.data.subscription.request_id, r.data.requestId);
+        assert.equal(me.data.subscription.ends_at, original);
+        assert.equal(me.data.subscription.status, "active");
+        const overview = await api(
+          "/admin/overview",
+          undefined,
+          admin.cookie,
+          "GET",
+        );
+        assert.equal(
+          overview.data.users.find((u) => u.id === me.data.id).request_id,
+          r.data.requestId,
+        );
+        const renewal = await api(
+          "/account/subscription-request",
+          { plan: "profissional", billingCycle: "anual", kind: "renew" },
+          owner.cookie,
+        );
+        assert.equal(renewal.status, 200);
+        assert.notEqual(renewal.data.requestId, r.data.requestId);
+        assert.equal(
+          (
+            await api(
+              "/account/subscription-request",
+              { plan: "essencial", billingCycle: "anual", kind: "invalid" },
+              owner.cookie,
             )
           ).status,
           400,
