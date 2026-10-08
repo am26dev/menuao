@@ -1,4 +1,5 @@
 import express from "express";
+import { installCommerceRoutes } from "./commerce-routes.mjs";
 import nodemailer from "nodemailer";
 import { installAccountRoutes } from "./account-routes.mjs";
 import { DatabaseSync } from "node:sqlite";
@@ -72,6 +73,8 @@ INSERT INTO spaces_v2 SELECT * FROM spaces; DROP TABLE spaces; ALTER TABLE space
   column("users", "mfa_enabled", "INTEGER NOT NULL DEFAULT 0");
   column("users", "mfa_last", "INTEGER NOT NULL DEFAULT -1");
   column("users", "recovery", "TEXT NOT NULL DEFAULT '[]'");
+  column("spaces", "logo", "TEXT NOT NULL DEFAULT ''");
+  column("spaces", "covers", "TEXT NOT NULL DEFAULT '[]'");
   column("spaces", "approval", "TEXT NOT NULL DEFAULT 'pending'");
   column("spaces", "review_note", "TEXT NOT NULL DEFAULT ''");
   db.exec(`CREATE TABLE IF NOT EXISTS subscriptions(user INTEGER PRIMARY KEY REFERENCES users(id),plan TEXT NOT NULL DEFAULT 'essencial',status TEXT NOT NULL DEFAULT 'pending',ends_at INTEGER,reference TEXT NOT NULL DEFAULT '',updated_at INTEGER);
@@ -161,6 +164,10 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
     derive = promisify(scrypt);
   const clean = (v, max = 200) =>
     typeof v === "string" ? v.trim().slice(0, max) : "";
+  // Existing product photographs were decoded at upload; approved venues may publish them immediately.
+  db.exec(
+    "UPDATE media SET status='approved' WHERE status='pending' AND EXISTS(SELECT 1 FROM products p JOIN spaces s ON p.space=s.id WHERE p.image=media.url AND s.owner=media.owner AND s.approval='approved')",
+  );
   const emailValid = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
   const fail = (res, message, status = 400) =>
     res.status(status).json({ error: message });
@@ -530,6 +537,20 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
     decryptSecret,
     mfaKey,
   });
+  installCommerceRoutes({
+    app,
+    db,
+    auth,
+    owner,
+    staff,
+    permit,
+    fail,
+    audit,
+    dataDir,
+    ownedSpace,
+    safeImage,
+    rate,
+  });
   app.post("/api/register", rate, async (req, res) => {
     const email = clean(req.body.email, 254).toLowerCase(),
       password = req.body.password;
@@ -702,6 +723,11 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
             "SELECT p.* FROM products p JOIN spaces s ON p.space=s.id WHERE s.owner=?",
           )
           .all(req.user.id),
+        paymentProofs: db
+          .prepare(
+            "SELECT id,request_id,status,bank_kind,created_at FROM payment_proofs WHERE user=?",
+          )
+          .all(req.user.id),
         subscription: subscription(req.user.id),
       }),
   );
@@ -709,8 +735,13 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
     const user = db.prepare("SELECT * FROM users WHERE id=?").get(req.user.id);
     if (!(await validPassword(user, req.body.password)))
       return fail(res, "Palavra-passe incorreta.", 401);
+    const receiptFiles = db
+      .prepare("SELECT filename FROM payment_proofs WHERE user=?")
+      .all(user.id);
     db.exec("BEGIN IMMEDIATE");
     try {
+      db.prepare("DELETE FROM payment_proofs WHERE user=?").run(user.id);
+      db.prepare("DELETE FROM email_jobs WHERE recipient=?").run(user.email);
       db.prepare(
         "DELETE FROM products WHERE space IN (SELECT id FROM spaces WHERE owner=?)",
       ).run(user.id);
@@ -730,6 +761,11 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
     } catch (e) {
       db.exec("ROLLBACK");
       throw e;
+    }
+    for (const receipt of receiptFiles) {
+      try {
+        unlinkSync(path.join(dataDir, "receipts", receipt.filename));
+      } catch {}
     }
     for (const file of readdirSync(uploadsDir).filter((f) =>
       f.startsWith(user.id + "-"),
@@ -807,7 +843,12 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
         req.user.id,
         bytes.length,
       );
-      res.json({ url, status: "pending" });
+      res.json({
+        url,
+        status: "pending",
+        message:
+          "Imagem carregada. Aguarda revisão da Muds antes de aparecer no menu público.",
+      });
     },
   );
   app.put("/api/space", auth, owner, (req, res) => {
@@ -878,7 +919,9 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
       return fail(res, "Estabelecimento não encontrado.", 404);
     res.json({
       products: db
-        .prepare("SELECT * FROM products WHERE space=? ORDER BY id DESC")
+        .prepare(
+          "SELECT p.*,m.status AS image_status FROM products p LEFT JOIN media m ON p.image=m.url WHERE p.space=? ORDER BY p.id DESC",
+        )
         .all(Number(req.params.id)),
     });
   });
@@ -927,6 +970,10 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
         "INSERT INTO products(name,category,description,price,image,available,space) VALUES(?,?,?,?,?,?,?)",
       ).run(...values, space.id);
     }
+    if (b.image && space.approval === "approved")
+      db.prepare(
+        "UPDATE media SET status='approved' WHERE url=? AND owner=? AND status='pending'",
+      ).run(b.image, req.user.id);
     res.json({ ok: true });
   });
   app.delete("/api/products/:id", auth, owner, (req, res) => {
@@ -943,7 +990,7 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
   function publicSpace(slug) {
     return db
       .prepare(
-        "SELECT s.id,s.slug,s.name,s.whatsapp,s.description,s.address,s.hours FROM spaces s JOIN subscriptions b ON s.owner=b.user JOIN users u ON s.owner=u.id WHERE s.slug=? AND s.published=1 AND s.approval='approved' AND b.status='active' AND b.ends_at>? AND u.disabled=0",
+        "SELECT s.id,s.slug,s.name,s.whatsapp,s.description,s.address,s.hours,s.logo,s.covers FROM spaces s JOIN subscriptions b ON s.owner=b.user JOIN users u ON s.owner=u.id WHERE s.slug=? AND s.published=1 AND s.approval='approved' AND b.status='active' AND b.ends_at>? AND u.disabled=0",
       )
       .get(slug, Date.now());
   }
@@ -951,7 +998,18 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
     const s = publicSpace(req.params.slug);
     if (!s) return fail(res, "Este menu não está disponível.", 404);
     res.json({
-      space: s,
+      space: {
+        ...s,
+        logo:
+          db
+            .prepare("SELECT url FROM media WHERE url=? AND status='approved'")
+            .get(s.logo)?.url || "",
+        covers: JSON.parse(s.covers || "[]").filter((url) =>
+          db
+            .prepare("SELECT url FROM media WHERE url=? AND status='approved'")
+            .get(url),
+        ),
+      },
       products: db
         .prepare(
           "SELECT p.id,p.name,p.category,p.description,p.price,CASE WHEN m.status='approved' THEN p.image ELSE '' END AS image,p.available FROM products p LEFT JOIN media m ON p.image=m.url WHERE p.space=? ORDER BY p.id",
@@ -1024,6 +1082,51 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
       const b = req.body;
       if (!["approved", "rejected", "pending"].includes(b.approval))
         return fail(res, "Estado inválido.");
+      if (b.approval === "approved") {
+        const s = db
+          .prepare("SELECT * FROM spaces WHERE id=?")
+          .get(Number(req.params.id));
+        if (!s) return fail(res, "Espaço não encontrado.", 404);
+        const covers = JSON.parse(s.covers || "[]");
+        if (
+          !s.logo ||
+          covers.length !== 4 ||
+          new Set(covers).size !== 4 ||
+          !safeImage(s.logo, s.owner) ||
+          covers.some((x) => !safeImage(x, s.owner))
+        )
+          return fail(
+            res,
+            "Para aprovar, é obrigatório um logotipo e quatro imagens de capa.",
+            409,
+          );
+        const urls = [
+          s.logo,
+          ...covers,
+          ...db
+            .prepare("SELECT image FROM products WHERE space=?")
+            .all(s.id)
+            .map((p) => p.image),
+        ].filter(Boolean);
+        if (
+          req.user.role !== "admin" &&
+          !req.user.permissions.includes("media.review") &&
+          urls.some(
+            (url) =>
+              db.prepare("SELECT status FROM media WHERE url=?").get(url)
+                ?.status === "pending",
+          )
+        )
+          return fail(
+            res,
+            "A aprovação destas imagens exige permissão para moderar imagens.",
+            403,
+          );
+        for (const url of urls)
+          db.prepare(
+            "UPDATE media SET status='approved' WHERE url=? AND owner=? AND status!='rejected'",
+          ).run(url, s.owner);
+      }
       if (
         !db
           .prepare("UPDATE spaces SET approval=?,review_note=? WHERE id=?")
@@ -1114,6 +1217,10 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
         Date.now(),
         cycle,
       );
+      if (b.status === "active" && previous.request_id)
+        db.prepare(
+          "UPDATE payment_proofs SET status='verified' WHERE user=? AND request_id=? AND status='pending'",
+        ).run(id, previous.request_id);
       audit(
         req,
         "subscription." + b.status,

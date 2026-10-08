@@ -1,3 +1,4 @@
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -238,6 +239,23 @@ test("Platform security and commercial workflows", async (t) => {
         let me = (await request("/me", "GET", undefined, a.cookie)).data;
         ownerId = me.id;
         spaceId = me.spaces[0].id;
+        const fixtureDb = new DatabaseSync(path.join(data, "menu.sqlite"));
+        const fixtureImages = Array.from(
+          { length: 5 },
+          (_, i) => "/uploads/fixture-" + i + ".webp",
+        );
+        for (const url of fixtureImages)
+          fixtureDb
+            .prepare("INSERT INTO media(url,owner,bytes) VALUES(?,?,?)")
+            .run(url, ownerId, 100);
+        fixtureDb
+          .prepare("UPDATE spaces SET logo=?,covers=? WHERE id=?")
+          .run(
+            fixtureImages[0],
+            JSON.stringify(fixtureImages.slice(1)),
+            spaceId,
+          );
+        fixtureDb.close();
         assert.equal(
           (
             await request(
@@ -506,7 +524,7 @@ test("Platform security and commercial workflows", async (t) => {
         );
         assert.equal(
           (await request("/menu/" + space.slug)).data.products[0].image,
-          "",
+          photo,
         );
         assert.equal(
           (

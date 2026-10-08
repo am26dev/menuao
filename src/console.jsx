@@ -1,3 +1,4 @@
+import { Payment, PaymentReview, Branding, PasswordLink } from "./Commerce.jsx";
 import React, { useState, useEffect, useRef } from "react";
 import MfaSetup from "./MfaSetup.jsx";
 import { createRoot } from "react-dom/client";
@@ -380,6 +381,7 @@ function SubscriptionChoice({ user, refresh }) {
           </p>
         </section>
       ) : null}
+      <Payment api={api} request={request} />
       {editing ? (
         <section className="panel" ref={formRef}>
           <h2>
@@ -617,7 +619,7 @@ function ProductEditor({ spaceId, product, onSaved, onCancel }) {
               available: d.available === "on",
               image,
             });
-            onSaved();
+            await onSaved();
           } catch (e) {
             setError(e.message);
             setBusy(false);
@@ -681,8 +683,9 @@ function ProductEditor({ spaceId, product, onSaved, onCancel }) {
               Retirar fotografia
             </button>
             <p>
-              As novas fotografias aguardam aprovação da Muds antes de
-              aparecerem no menu público.
+              A fotografia é validada e guardada com o produto. Num espaço já
+              aprovado, aparece no menu após guardar; num espaço pendente,
+              acompanha a aprovação.
             </p>
           </>
         ) : null}
@@ -954,6 +957,7 @@ function Owner({ user, refresh }) {
               </p>
             )}
           </section>
+          <Branding key={space.id} api={api} space={space} onSaved={refresh} />
           <section className="panel">
             <div className="panel-heading">
               <h2>Produtos</h2>
@@ -965,7 +969,23 @@ function Owner({ user, refresh }) {
               products.map((p) => (
                 <article className="management-row" key={p.id}>
                   <div>
+                    {p.image ? (
+                      <img
+                        src={p.image}
+                        width="64"
+                        height="64"
+                        style={{ objectFit: "cover", borderRadius: 8 }}
+                        alt={p.name}
+                      />
+                    ) : null}
                     <strong>{p.name}</strong>
+                    {p.image && p.image_status !== "approved" ? (
+                      <small>
+                        {p.image_status === "rejected"
+                          ? "Fotografia recusada: substitui a imagem."
+                          : "Fotografia guardada · aguarda aprovação da Muds para aparecer no menu."}
+                      </small>
+                    ) : null}
                     <span>
                       {p.category} · {amount(p.price)}
                     </span>
@@ -1317,6 +1337,23 @@ function Staff({ user }) {
                 {s.address} · {s.hours}
               </p>
               <p>{s.description}</p>
+              <div className="media-grid">
+                {[s.logo, ...JSON.parse(s.covers || "[]")]
+                  .filter(Boolean)
+                  .map((url) => (
+                    <img
+                      key={url}
+                      src={url}
+                      alt={"Identidade visual de " + s.name}
+                      className="review-image"
+                    />
+                  ))}
+              </div>
+              <p>
+                {s.logo && JSON.parse(s.covers || "[]").length === 4
+                  ? "Identidade visual completa. Ao aprovar o espaço, aprovas também as fotografias associadas que estão pendentes."
+                  : "Falta logotipo ou as quatro capas: não é possível aprovar."}
+              </p>
               <p>
                 /{s.slug} · {s.published ? "Publicação solicitada" : "Rascunho"}
               </p>
@@ -1360,6 +1397,7 @@ function Staff({ user }) {
             .map((u) => (
               <article key={u.id} className="review-card">
                 <h3>{u.email}</h3>
+                <PaymentReview api={api} userId={u.id} />
                 {u.request_id ? (
                   <p>
                     Solicitação {u.request_id} ·{" "}
@@ -1815,7 +1853,11 @@ function Console() {
           <ProfileSecurity user={user} refresh={refresh} />
         ) : user.must_change_password ||
           location.pathname === "/alterar-senha" ? (
-          <PasswordChange user={user} required={!!user.must_change_password} />
+          user.must_change_password ? (
+            <PasswordChange user={user} required />
+          ) : (
+            <PasswordLink api={api} user={user} />
+          )
         ) : user.role === "owner" ? (
           location.pathname === "/assinatura" ? (
             <SubscriptionChoice user={user} refresh={refresh} />

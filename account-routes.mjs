@@ -69,9 +69,202 @@ export function installAccountRoutes({
       : null;
   const testOutbox =
     process.env.NODE_ENV === "test" && process.env.MAIL_TEST_OUTBOX;
+  db.exec(
+    "CREATE TABLE IF NOT EXISTS email_jobs(id INTEGER PRIMARY KEY,recipient TEXT NOT NULL,subject TEXT NOT NULL,text TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',attempts INTEGER NOT NULL DEFAULT 0,next_at INTEGER NOT NULL,created_at INTEGER NOT NULL,expires INTEGER)",
+  );
+  if (
+    !db
+      .prepare("PRAGMA table_info(email_jobs)")
+      .all()
+      .some((c) => c.name === "expires")
+  )
+    db.exec("ALTER TABLE email_jobs ADD COLUMN expires INTEGER");
+  let sending = false;
+  async function flushMail() {
+    if (sending || (!mail && !testOutbox)) return;
+    sending = true;
+    db.prepare(
+      "UPDATE email_jobs SET status='expired',text='' WHERE status='pending' AND expires IS NOT NULL AND expires<=?",
+    ).run(Date.now());
+    try {
+      for (const job of db
+        .prepare(
+          "SELECT * FROM email_jobs WHERE status='pending' AND next_at<=? AND attempts<8 ORDER BY id LIMIT 20",
+        )
+        .all(Date.now())) {
+        try {
+          const message = {
+            from: smtpFrom,
+            to: job.recipient,
+            subject: job.subject,
+            text: decryptSecret(job.text, mfaKey),
+          };
+          if (testOutbox)
+            appendFileSync(
+              testOutbox + ".notifications",
+              JSON.stringify(message) + "\n",
+              { mode: 0o600 },
+            );
+          else await mail.sendMail(message);
+          db.prepare(
+            "UPDATE email_jobs SET status='sent',text='',attempts=attempts+1 WHERE id=?",
+          ).run(job.id);
+        } catch {
+          db.prepare(
+            "UPDATE email_jobs SET attempts=attempts+1,next_at=? WHERE id=?",
+          ).run(
+            Date.now() + Math.min(3600000, 60000 * 2 ** job.attempts),
+            job.id,
+          );
+        }
+      }
+    } finally {
+      sending = false;
+    }
+  }
+  const mailTimer = setInterval(() => {
+    try {
+      void flushMail().catch(() => {});
+    } catch {}
+  }, 30000);
+  mailTimer.unref();
+  function notify(email, subject, text, expires = null) {
+    if (!email) return;
+    db.prepare(
+      "INSERT INTO email_jobs(recipient,subject,text,next_at,created_at,expires) VALUES(?,?,?,?,?,?)",
+    ).run(
+      email,
+      "Menu Online — " + subject,
+      encryptSecret(
+        text +
+          "\n\nEquipa Muds — Menu Online\nSe não reconheces esta ação, contacta a Muds em https://muds.ao/contacto.",
+        mfaKey,
+      ),
+      Date.now(),
+      Date.now(),
+      expires,
+    );
+    void flushMail().catch(() => {});
+  }
+  app.use((req, res, next) => {
+    res.on("finish", () => {
+      if (
+        !["POST", "PUT", "DELETE"].includes(req.method) ||
+        res.statusCode >= 400
+      )
+        return;
+      const actions = {
+        "/api/register":
+          "Bem-vindo ao Menu Online! A tua conta foi criada. Entra em " +
+          origin +
+          "/painel para configurar o teu estabelecimento.",
+        "/api/account/delete": "A tua conta foi eliminada da plataforma.",
+        "/api/space":
+          "As informações do teu estabelecimento foram atualizadas.",
+        "/api/products": "Um produto foi guardado na tua conta.",
+        "/api/account/subscription-request":
+          "O teu pedido de assinatura foi registado. Consulta " +
+          origin +
+          "/assinatura.",
+        "/api/account/payment-proof":
+          "O teu comprovativo foi recebido e aguarda verificação.",
+        "/api/account/mfa/disable":
+          "A autenticação de dois fatores foi desativada.",
+        "/api/staff/mfa/enable": "A autenticação de dois fatores foi ativada.",
+        "/api/account/password": "A tua palavra-passe foi alterada.",
+      };
+      const text =
+        actions[req.path] ||
+        (/^\/api\/spaces\/\d+\/branding$/.test(req.path)
+          ? "O logotipo e as capas do teu estabelecimento foram atualizados."
+          : null) ||
+        (req.method === "DELETE" && req.path.startsWith("/api/products/")
+          ? "Um produto foi eliminado da tua conta."
+          : null);
+      if (
+        !text &&
+        !/^\/api\/admin\/(spaces|subscriptions)\/\d+$/.test(req.path) &&
+        req.path !== "/api/admin/media"
+      )
+        return;
+      let email =
+        req.user?.email ||
+        (req.path === "/api/register"
+          ? String(req.body.email || "")
+              .trim()
+              .toLowerCase()
+          : null);
+      let details = text;
+      if (/^\/api\/admin\/subscriptions\/\d+$/.test(req.path)) {
+        email = db
+          .prepare("SELECT email FROM users WHERE id=?")
+          .get(Number(req.params.id))?.email;
+        details =
+          "O estado da tua assinatura foi atualizado pela Muds para: " +
+          req.body.status +
+          ". Consulta " +
+          origin +
+          "/assinatura.";
+      }
+      if (/^\/api\/admin\/spaces\/\d+$/.test(req.path)) {
+        email = db
+          .prepare(
+            "SELECT u.email FROM users u JOIN spaces s ON s.owner=u.id WHERE s.id=?",
+          )
+          .get(Number(req.params.id))?.email;
+        details =
+          "A revisão do teu estabelecimento foi atualizada: " +
+          req.body.approval +
+          ". Consulta o painel.";
+      }
+      if (req.path === "/api/admin/media") {
+        email = db
+          .prepare(
+            "SELECT u.email FROM users u JOIN media m ON m.owner=u.id WHERE m.url=?",
+          )
+          .get(req.body.url)?.email;
+        details =
+          "Uma fotografia da tua conta foi revista pela Muds: " +
+          req.body.status +
+          ".";
+      }
+      notify(
+        email,
+        req.path === "/api/register" ? "Bem-vindo" : "Confirmação de alteração",
+        details,
+      );
+    });
+    next();
+  });
+  app.post("/api/account/password-link", auth, rate, reauth, (req, res) => {
+    if (!mail && !testOutbox)
+      return fail(
+        res,
+        "O email de envio ainda não está configurado pela Muds. A palavra-passe não foi alterada.",
+        503,
+      );
+    const user = db.prepare("SELECT * FROM users WHERE id=?").get(req.user.id);
+    const reset = issue(user);
+    notify(
+      user.email,
+      "Confirmar alteração de palavra-passe",
+      "Para definir a nova palavra-passe, abre este link privado, válido por 30 minutos e uma única utilização:\n" +
+        reset.url +
+        "\nSe não pediste esta alteração, ignora o link.",
+      Date.now() + 30 * 60000,
+    );
+    res.json({
+      ok: true,
+      message:
+        "Pedido registado. O link está a ser enviado para o teu email. Verifica também o spam.",
+    });
+  });
   app.get("/api/admin/mail", auth, staff, admin, (req, res) =>
     res.json({
       configured: !!mail,
+      pending: db
+        .prepare("SELECT COUNT(*) AS n FROM email_jobs WHERE status='pending'")
+        .get().n,
       username: smtpFrom || "",
       host: "smtp.hostinger.com",
       port: 465,
@@ -117,6 +310,7 @@ export function installAccountRoutes({
       "INSERT INTO mail_settings VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET username=excluded.username,password=excluded.password",
     ).run(username, encryptSecret(password, mfaKey));
     mail = transport;
+    void flushMail().catch(() => {});
     smtpFrom = username;
     audit(req, "mail.configured", username);
     res.json({ ok: true });
@@ -231,6 +425,11 @@ export function installAccountRoutes({
       db.prepare("DELETE FROM sessions WHERE user=?").run(row.id);
       audit({ user: row }, "password.reset.completed", row.id);
       db.exec("COMMIT");
+      notify(
+        row.email,
+        "Palavra-passe alterada",
+        "A tua palavra-passe foi redefinida e todas as sessões anteriores foram terminadas.",
+      );
     } catch (e) {
       db.exec("ROLLBACK");
       throw e;
