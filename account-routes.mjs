@@ -198,7 +198,7 @@ export function installAccountRoutes({
       if (/^\/api\/admin\/subscriptions\/\d+$/.test(req.path)) {
         email = db
           .prepare("SELECT email FROM users WHERE id=?")
-          .get(Number(req.params.id))?.email;
+          .get(Number(req.path.split("/").pop()))?.email;
         details =
           "O estado da tua assinatura foi atualizado pela Muds para: " +
           req.body.status +
@@ -211,7 +211,7 @@ export function installAccountRoutes({
           .prepare(
             "SELECT u.email FROM users u JOIN spaces s ON s.owner=u.id WHERE s.id=?",
           )
-          .get(Number(req.params.id))?.email;
+          .get(Number(req.path.split("/").pop()))?.email;
         details =
           "A revisão do teu estabelecimento foi atualizada: " +
           req.body.approval +
