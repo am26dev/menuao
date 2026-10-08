@@ -164,10 +164,21 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
     derive = promisify(scrypt);
   const clean = (v, max = 200) =>
     typeof v === "string" ? v.trim().slice(0, max) : "";
-  // Existing product photographs were decoded at upload; approved venues may publish them immediately.
+  // One-time repair for previously hidden, decoded photos of approved venues.
   db.exec(
-    "UPDATE media SET status='approved' WHERE status='pending' AND EXISTS(SELECT 1 FROM products p JOIN spaces s ON p.space=s.id WHERE p.image=media.url AND s.owner=media.owner AND s.approval='approved')",
+    "CREATE TABLE IF NOT EXISTS schema_migrations(name TEXT PRIMARY KEY)",
   );
+  if (
+    !db
+      .prepare(
+        "SELECT name FROM schema_migrations WHERE name='approved-product-photos-v1'",
+      )
+      .get()
+  ) {
+    db.exec(
+      "BEGIN IMMEDIATE; UPDATE media SET status='approved' WHERE status='pending' AND EXISTS(SELECT 1 FROM products p JOIN spaces s ON p.space=s.id WHERE p.image=media.url AND s.owner=media.owner AND s.approval='approved'); INSERT INTO schema_migrations VALUES('approved-product-photos-v1'); COMMIT;",
+    );
+  }
   const emailValid = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
   const fail = (res, message, status = 400) =>
     res.status(status).json({ error: message });
