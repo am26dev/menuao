@@ -315,6 +315,10 @@ test("Password recovery, temporary administrator and subscription periods", asyn
         );
         assert.equal(renewal.status, 200);
         assert.notEqual(renewal.data.requestId, r.data.requestId);
+        assert.equal((await api("/admin/subscriptions/"+me.data.id,{plan:"profissional",billingCycle:"anual",status:"active",reference:"renewal-test",confirmationPassword:password},admin.cookie,"PUT")).status,200);
+        const renewed=await api("/me",undefined,owner.cookie,"GET");
+        assert.ok(renewed.data.subscription.ends_at>original+364*86400000);
+        assert.equal(renewed.data.subscription.request_id,null);
         assert.equal(
           (
             await api(
