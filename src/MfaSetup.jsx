@@ -19,7 +19,7 @@ export default function MfaSetup({ api, onComplete }) {
   }, [api]);
   return (
     <section className="panel activation">
-      <span className="eyebrow">SEGURANÇA DA EQUIPA MUDS</span>
+      <span className="eyebrow">SEGURANÇA DA CONTA</span>
       <h1>Ativa a verificação em dois passos.</h1>
       {codes ? (
         <>

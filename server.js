@@ -330,13 +330,7 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
   const staff = (req, res, next) =>
     !["admin", "manager"].includes(req.user.role)
       ? fail(res, "Acesso reservado à equipa Muds.", 403)
-      : !req.user.mfa_enabled
-        ? fail(
-            res,
-            "Ativa a autenticação em dois passos para aceder à gestão.",
-            403,
-          )
-        : next();
+      : next();
   const admin = (req, res, next) =>
     req.user.role === "admin"
       ? next()
@@ -464,7 +458,6 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
     return true;
   }
   app.get("/api/staff/mfa/setup", auth, (req, res) => {
-    if (req.user.role === "owner") return fail(res, "Acesso reservado.", 403);
     const user = db.prepare("SELECT * FROM users WHERE id=?").get(req.user.id);
     if (user.mfa_enabled)
       return fail(res, "A autenticação em dois passos já está ativa.", 409);
@@ -487,7 +480,6 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
     });
   });
   app.post("/api/staff/mfa/enable", auth, rate, reauth, (req, res) => {
-    if (req.user.role === "owner") return fail(res, "Acesso reservado.", 403);
     const user = db.prepare("SELECT * FROM users WHERE id=?").get(req.user.id);
     if (user.mfa_enabled || !user.mfa_pending)
       return fail(res, "Configuração inválida.", 409);
@@ -504,6 +496,17 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
     ).run(JSON.stringify(codes.map(hash)), user.id);
     audit(req, "mfa.enabled", user.id);
     res.json({ ok: true, recoveryCodes: codes });
+  });
+  app.post("/api/account/mfa/disable", auth, rate, reauth, (req, res) => {
+    const user = db.prepare("SELECT * FROM users WHERE id=?").get(req.user.id);
+    if (!user.mfa_enabled || !consumeMfa(user, req.body.code))
+      return fail(res, "Código de autenticação inválido ou já utilizado.", 401);
+    db.prepare(
+      "UPDATE users SET mfa_enabled=0,mfa_secret='',mfa_pending='',mfa_last=-1,recovery='[]' WHERE id=?",
+    ).run(user.id);
+    db.prepare("DELETE FROM sessions WHERE user=?").run(user.id);
+    audit(req, "mfa.disabled", user.id);
+    res.json({ ok: true });
   });
   installAccountRoutes({
     app,
@@ -572,7 +575,7 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
       throw e;
     }
   });
-  app.post("/api/login", rate, async (req, res) => {
+  app.post(["/api/login", "/api/staff/login"], rate, async (req, res) => {
     const user = db
       .prepare("SELECT * FROM users WHERE email=?")
       .get(clean(req.body.email, 254).toLowerCase());
@@ -584,11 +587,11 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
       (user.must_change_password && user.temporary_expires < Date.now())
     )
       return fail(res, "Dados de acesso inválidos.", 401);
-    if (
-      user.role !== "owner" &&
-      user.mfa_enabled &&
-      !consumeMfa(user, req.body.code)
-    )
+    if ((req.path === "/api/staff/login") === (user.role === "owner"))
+      return fail(res, "Dados de acesso inválidos.", 401);
+    if (user.mfa_enabled && !req.body.code)
+      return res.json({ mfaRequired: true });
+    if (user.mfa_enabled && !consumeMfa(user, req.body.code))
       return fail(res, "Código de autenticação inválido ou já utilizado.", 401);
     session(res, user);
     audit({ user }, "login", user.id);
@@ -610,11 +613,7 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
       (user.must_change_password && user.temporary_expires < Date.now())
     )
       return fail(res, "Dados de acesso inválidos.", 401);
-    if (
-      user.role !== "owner" &&
-      user.mfa_enabled &&
-      !consumeMfa(user, req.body.code)
-    )
+    if (user.mfa_enabled && !consumeMfa(user, req.body.code))
       return fail(res, "Código de autenticação inválido ou já utilizado.", 401);
     const token = session(res, user, true);
     audit({ user }, "mobile.login", user.id);
@@ -1258,6 +1257,10 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
     res.set("Cache-Control", "private, no-store");
     res.sendFile(path.resolve(uploadsDir, req.params.file));
   });
+  app.use(["/acesso-muds", "/gestao", "/perfil"], (req, res, next) => {
+    res.set("X-Robots-Tag", "noindex, nofollow, noarchive");
+    next();
+  });
   app.use(
     express.static("public", {
       maxAge: production ? "5m" : 0,
@@ -1268,6 +1271,8 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
     [
       "/",
       "/entrar",
+      "/acesso-muds",
+      "/perfil",
       "/criar-conta",
       "/painel",
       "/gestao",

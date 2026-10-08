@@ -48,13 +48,14 @@ function Shell({ children, user }) {
             menuonline<sup>AO</sup>
           </a>
           <span>{user?.name || user?.email || "Muds"}</span>
-          {user ? <a href="/alterar-senha">Alterar palavra-passe</a> : null}
+          {user ? <a href="/perfil">Perfil e segurança</a> : null}
           {user ? (
             <button
               className="btn small outline"
               onClick={async () => {
                 await api("/logout", "POST");
-                location.href = "/entrar";
+                location.href =
+                  user.role === "owner" ? "/entrar" : "/acesso-muds";
               }}
             >
               Sair
@@ -104,7 +105,9 @@ function PasswordChange({ user, required = false }) {
           setError("");
           try {
             await api("/account/password", "POST", d);
-            location.href = "/entrar?senha=alterada";
+            location.href =
+              (user.role === "owner" ? "/entrar" : "/acesso-muds") +
+              "?senha=alterada";
           } catch (e) {
             setError(e.message);
           } finally {
@@ -1695,6 +1698,100 @@ function Staff({ user }) {
     </>
   );
 }
+function ProfileSecurity({ user, refresh }) {
+  const [setup, setSetup] = useState(false),
+    [error, setError] = useState(""),
+    [busy, setBusy] = useState(false);
+  return (
+    <section className="panel activation">
+      <span className="eyebrow">A TUA CONTA</span>
+      <h1>Perfil e segurança.</h1>
+      <p>{user.name || user.email}</p>
+      <p>{user.email}</p>
+      <a className="btn outline" href="/alterar-senha">
+        Alterar palavra-passe
+      </a>
+      <h2>Autenticação de dois fatores</h2>
+      {user.mfa_enabled ? (
+        <>
+          <p>Ativa. O código será pedido depois da palavra-passe ao entrar.</p>
+          <details>
+            <summary>Desativar autenticação de dois fatores</summary>
+            <p>
+              A conta passará a usar apenas a palavra-passe. Esta ação termina
+              todas as sessões.
+            </p>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                setBusy(true);
+                setError("");
+                try {
+                  await api(
+                    "/account/mfa/disable",
+                    "POST",
+                    Object.fromEntries(new FormData(e.currentTarget)),
+                  );
+                  location.href =
+                    user.role === "owner" ? "/entrar" : "/acesso-muds";
+                } catch (err) {
+                  setError(err.message);
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              <Field
+                label="Palavra-passe atual"
+                name="confirmationPassword"
+                type="password"
+                required
+                autoComplete="current-password"
+                maxLength="128"
+              />
+              <Field
+                label="Código da aplicação ou recuperação"
+                name="code"
+                required
+                autoComplete="one-time-code"
+                maxLength="32"
+              />
+              <button className="btn outline" disabled={busy}>
+                {busy ? "A verificar…" : "Desativar proteção"}
+              </button>
+              <p role="alert" className="form-error">
+                {error}
+              </p>
+            </form>
+          </details>
+        </>
+      ) : setup ? (
+        <MfaSetup
+          api={api}
+          onComplete={() => {
+            setSetup(false);
+            refresh();
+          }}
+        />
+      ) : (
+        <>
+          <p>
+            Protege a tua conta com um código da aplicação autenticadora. A
+            ativação é opcional.
+          </p>
+          <button className="btn" onClick={() => setSetup(true)}>
+            Configurar autenticação de dois fatores
+          </button>
+        </>
+      )}
+      <p>
+        <a href={user.role === "owner" ? "/painel" : "/gestao"}>
+          Voltar ao painel
+        </a>
+      </p>
+    </section>
+  );
+}
 function Console() {
   const [user, setUser] = useState(null),
     [error, setError] = useState("");
@@ -1714,7 +1811,10 @@ function Console() {
   return (
     <Shell user={user}>
       {user ? (
-        user.must_change_password || location.pathname === "/alterar-senha" ? (
+        location.pathname === "/perfil" && !user.must_change_password ? (
+          <ProfileSecurity user={user} refresh={refresh} />
+        ) : user.must_change_password ||
+          location.pathname === "/alterar-senha" ? (
           <PasswordChange user={user} required={!!user.must_change_password} />
         ) : user.role === "owner" ? (
           location.pathname === "/assinatura" ? (
@@ -1731,8 +1831,6 @@ function Console() {
               <Owner user={user} refresh={refresh} />
             </>
           )
-        ) : !user.mfa_enabled ? (
-          <MfaSetup api={api} onComplete={refresh} />
         ) : (
           <Staff user={user} />
         )
@@ -1740,7 +1838,10 @@ function Console() {
         <>
           <h1>Entra para continuar.</h1>
           <p>{error}</p>
-          <a className="btn" href="/entrar">
+          <a
+            className="btn"
+            href={location.pathname === "/gestao" ? "/acesso-muds" : "/entrar"}
+          >
             Entrar
           </a>
         </>

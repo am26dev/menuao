@@ -247,7 +247,7 @@ export function installAccountRoutes({
       return fail(res, "Usa uma palavra-passe de 14 a 128 caracteres.");
     if (await validPassword(u, p))
       return fail(res, "Escolhe uma palavra-passe diferente da anterior.");
-    if (u.role !== "owner" && u.mfa_enabled && !consumeMfa(u, req.body.code))
+    if (u.mfa_enabled && !consumeMfa(u, req.body.code))
       return fail(res, "Código de autenticação inválido ou já utilizado.", 401);
     const salt = randomBytes(16).toString("hex"),
       password = (await derive(p, salt, 64)).toString("hex");

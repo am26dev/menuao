@@ -135,7 +135,7 @@ test("Platform security and commercial workflows", async (t) => {
           ).status,
           403,
         );
-        admin = await request("/login", "POST", {
+        admin = await request("/staff/login", "POST", {
           email: "muaza.alfredo@gmail.com",
           password: adminPassword,
         });
@@ -144,7 +144,7 @@ test("Platform security and commercial workflows", async (t) => {
         assert.equal(
           (await request("/admin/overview", "GET", undefined, admin.cookie))
             .status,
-          403,
+          200,
         );
         const adminMfa = (
           await request("/staff/mfa/setup", "GET", undefined, admin.cookie)
@@ -572,7 +572,7 @@ test("Platform security and commercial workflows", async (t) => {
           ).status,
           200,
         );
-        manager = await request("/login", "POST", {
+        manager = await request("/staff/login", "POST", {
           email: "manager@example.test",
           password: adminPassword,
         });
@@ -662,7 +662,7 @@ test("Platform security and commercial workflows", async (t) => {
           (await request("/me", "GET", undefined, manager.cookie)).status,
           401,
         );
-        manager = await request("/login", "POST", {
+        manager = await request("/staff/login", "POST", {
           email: "manager@example.test",
           password: adminPassword,
           code: recovery,
@@ -670,7 +670,7 @@ test("Platform security and commercial workflows", async (t) => {
         assert.equal(manager.status, 200);
         assert.equal(
           (
-            await request("/login", "POST", {
+            await request("/staff/login", "POST", {
               email: "manager@example.test",
               password: adminPassword,
               code: recovery,
