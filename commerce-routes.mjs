@@ -193,9 +193,16 @@ export function installCommerceRoutes({
         res,
         "Adiciona um logotipo e quatro fotografias de capa diferentes.",
       );
-    db.prepare(
-      "UPDATE spaces SET logo=?,covers=?,approval='pending' WHERE id=?",
-    ).run(logo, JSON.stringify(covers), s.id);
+    db.prepare("UPDATE spaces SET logo=?,covers=? WHERE id=?").run(
+      logo,
+      JSON.stringify(covers),
+      s.id,
+    );
+    if (s.approval === "approved")
+      for (const url of [logo, ...covers])
+        db.prepare(
+          "UPDATE media SET status='approved' WHERE url=? AND owner=? AND status='pending'",
+        ).run(url, req.user.id);
     audit(req, "space.branding.updated", s.id);
     res.json({ ok: true });
   });

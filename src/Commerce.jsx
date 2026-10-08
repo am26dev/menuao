@@ -194,7 +194,9 @@ export function Branding({ api, space, onSaved }) {
               logo,
               covers,
             });
-            setMessage("Imagens guardadas. O espaço aguarda revisão da Muds.");
+            setMessage(
+              "Imagens guardadas. Se o espaço já está aprovado, ficam disponíveis no menu.",
+            );
             await onSaved();
           } catch (err) {
             setError(err.message);

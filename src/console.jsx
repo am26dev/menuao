@@ -713,6 +713,21 @@ function ProductEditor({ spaceId, product, onSaved, onCancel }) {
   );
 }
 function SpaceEditor({ space, onSaved, onCancel }) {
+  const [zones, setZones] = useState({}),
+    [province, setProvince] = useState(space?.province || ""),
+    [municipality, setMunicipality] = useState(space?.municipality || "");
+  useEffect(() => {
+    let active = true;
+    fetch("/zones.json")
+      .then((r) => r.json())
+      .then((d) => {
+        if (active) setZones(d);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
   const [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
   return (
@@ -777,6 +792,50 @@ function SpaceEditor({ space, onSaved, onCancel }) {
             defaultValue={space?.hours}
           />
         </div>
+        <div className="form-grid">
+          <label>
+            Província
+            <select
+              name="province"
+              required
+              value={province}
+              onChange={(e) => {
+                setProvince(e.target.value);
+                setMunicipality("");
+              }}
+            >
+              <option value="">Seleciona a província</option>
+              {Object.keys(zones)
+                .sort((a, b) => a.localeCompare(b, "pt"))
+                .map((p) => (
+                  <option key={p}>{p}</option>
+                ))}
+            </select>
+          </label>
+          <label>
+            Município
+            <select
+              name="municipality"
+              required
+              disabled={!province}
+              value={municipality}
+              onChange={(e) => setMunicipality(e.target.value)}
+            >
+              <option value="">Seleciona o município</option>
+              {(zones[province] || []).map((m) => (
+                <option key={m}>{m}</option>
+              ))}
+            </select>
+          </label>
+          <Field
+            label="Bairro"
+            name="neighborhood"
+            required
+            minLength="2"
+            maxLength="100"
+            defaultValue={space?.neighborhood}
+          />
+        </div>
         <label className="checkbox-label">
           <input
             name="published"
@@ -787,7 +846,8 @@ function SpaceEditor({ space, onSaved, onCancel }) {
         </label>
         <p>
           O menu fica público após aprovação da Muds e ativação da assinatura.
-          Alterar o nome, contacto ou morada exige nova revisão.
+          Depois de aprovado, podes atualizar as informações e preferências sem
+          nova aprovação.
         </p>
         <p className="form-error" role="alert">
           {error}

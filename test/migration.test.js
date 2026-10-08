@@ -40,18 +40,22 @@ test("Upgrade preserves legacy account, menu and products and supports a second 
     Date.now() + 60000,
   );
   db.close();
-  const server = spawn(process.execPath, ["--input-type=commonjs", "-e", "require('./server.js')"], {
-    env: {
-      ...process.env,
-      PORT: "3102",
-      DATA_DIR: data,
-      PUBLIC_URL: "http://127.0.0.1:3102",
-      NODE_ENV: "test",
-      STAFF_ADMIN_ACTIVATION: "",
-      STAFF_MANAGER_ACTIVATION: "",
+  const server = spawn(
+    process.execPath,
+    ["--input-type=commonjs", "-e", "require('./server.js')"],
+    {
+      env: {
+        ...process.env,
+        PORT: "3102",
+        DATA_DIR: data,
+        PUBLIC_URL: "http://127.0.0.1:3102",
+        NODE_ENV: "test",
+        STAFF_ADMIN_ACTIVATION: "",
+        STAFF_MANAGER_ACTIVATION: "",
+      },
+      stdio: "pipe",
     },
-    stdio: "pipe",
-  });
+  );
   let logs = "";
   server.stderr.on("data", (d) => (logs += d));
   try {
@@ -89,6 +93,9 @@ test("Upgrade preserves legacy account, menu and products and supports a second 
           headers,
           body: JSON.stringify({
             name: "Segundo espaço",
+            province: "Luanda",
+            municipality: "Talatona",
+            neighborhood: "Centro",
             slug: "segundo-legacy",
             whatsapp: "244923456789",
           }),

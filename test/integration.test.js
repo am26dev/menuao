@@ -60,6 +60,9 @@ test("Platform security and commercial workflows", async (t) => {
   let a, b, admin, manager, ownerId, spaceId, productId, photo, managerId;
   const space = {
     name: "Teste Luanda",
+    province: "Luanda",
+    municipality: "Talatona",
+    neighborhood: "Centro",
     slug: "teste-luanda",
     whatsapp: "244923456789",
     address: "Luanda",

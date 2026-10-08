@@ -1,3 +1,4 @@
+import zones from "./zones.json";
 import React, { useState, useEffect } from "react";
 import {
   View,
@@ -466,6 +467,9 @@ function Owner({ user, token, refresh, onError }) {
             slug: "",
             whatsapp: "244",
             description: "",
+            province: "",
+            municipality: "",
+            neighborhood: "",
             address: "",
             hours: "",
             published: true,
@@ -481,6 +485,7 @@ function Owner({ user, token, refresh, onError }) {
             ["whatsapp", "WhatsApp (244 + 9 dígitos)"],
             ["description", "Descrição"],
             ["address", "Morada"],
+            ["neighborhood", "Bairro"],
             ["hours", "Horário"],
           ].map(([key, label]) => (
             <Input
@@ -491,6 +496,34 @@ function Owner({ user, token, refresh, onError }) {
               maxLength={key === "description" ? 1000 : 100}
             />
           ))}
+          <Text style={s.paragraph}>
+            Província: {draft.province || "Seleciona"}
+          </Text>
+          <ScrollView horizontal>
+            {Object.keys(zones).map((p) => (
+              <Button
+                key={p}
+                title={p}
+                secondary={draft.province !== p}
+                onPress={() =>
+                  setDraft((d) => ({ ...d, province: p, municipality: "" }))
+                }
+              />
+            ))}
+          </ScrollView>
+          <Text style={s.paragraph}>
+            Município: {draft.municipality || "Seleciona"}
+          </Text>
+          <ScrollView horizontal>
+            {(zones[draft.province] || []).map((m) => (
+              <Button
+                key={m}
+                title={m}
+                secondary={draft.municipality !== m}
+                onPress={() => setDraft((d) => ({ ...d, municipality: m }))}
+              />
+            ))}
+          </ScrollView>
           <Button
             title="Guardar e solicitar publicação"
             disabled={busy}

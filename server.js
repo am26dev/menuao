@@ -73,6 +73,11 @@ INSERT INTO spaces_v2 SELECT * FROM spaces; DROP TABLE spaces; ALTER TABLE space
   column("users", "mfa_enabled", "INTEGER NOT NULL DEFAULT 0");
   column("users", "mfa_last", "INTEGER NOT NULL DEFAULT -1");
   column("users", "recovery", "TEXT NOT NULL DEFAULT '[]'");
+  for (const field of ["province", "municipality", "neighborhood"])
+    column("spaces", field, "TEXT NOT NULL DEFAULT ''");
+  const zones = JSON.parse(
+    readFileSync(new URL("./public/zones.json", import.meta.url), "utf8"),
+  );
   column("spaces", "logo", "TEXT NOT NULL DEFAULT ''");
   column("spaces", "covers", "TEXT NOT NULL DEFAULT '[]'");
   column("spaces", "approval", "TEXT NOT NULL DEFAULT 'pending'");
@@ -881,6 +886,22 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
     const existing = b.id ? ownedSpace(req, b.id) : null;
     if (b.id && !existing)
       return fail(res, "Estabelecimento não encontrado.", 404);
+    const province = clean(b.province, 80),
+      municipality = clean(b.municipality, 100),
+      neighborhood = clean(b.neighborhood, 100);
+    if (
+      (!existing || b.province !== undefined) &&
+      (!zones[province]?.includes(municipality) || neighborhood.length < 2)
+    )
+      return fail(
+        res,
+        "Seleciona uma província, um município dessa província e indica o bairro.",
+      );
+    const zoneValues = [
+      province || existing?.province || "",
+      municipality || existing?.municipality || "",
+      neighborhood || existing?.neighborhood || "",
+    ];
     const sub = subscription(req.user.id);
     if (
       !existing &&
@@ -905,19 +926,12 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
     try {
       if (existing)
         db.prepare(
-          "UPDATE spaces SET slug=?,name=?,whatsapp=?,description=?,address=?,hours=?,published=?,approval=CASE WHEN name!=? OR whatsapp!=? OR address!=? THEN 'pending' ELSE approval END WHERE id=? AND owner=?",
-        ).run(
-          ...values,
-          name,
-          whatsapp,
-          clean(b.address, 200),
-          existing.id,
-          req.user.id,
-        );
+          "UPDATE spaces SET slug=?,name=?,whatsapp=?,description=?,address=?,hours=?,published=?,province=?,municipality=?,neighborhood=? WHERE id=? AND owner=?",
+        ).run(...values, ...zoneValues, existing.id, req.user.id);
       else
         db.prepare(
-          "INSERT INTO spaces(slug,name,whatsapp,description,address,hours,published,owner) VALUES(?,?,?,?,?,?,?,?)",
-        ).run(...values, req.user.id);
+          "INSERT INTO spaces(slug,name,whatsapp,description,address,hours,published,province,municipality,neighborhood,owner) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        ).run(...values, ...zoneValues, req.user.id);
       res.json({ ok: true });
     } catch (e) {
       if (String(e).includes("UNIQUE"))
@@ -998,10 +1012,51 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
       return fail(res, "Produto não encontrado.", 404);
     res.json({ ok: true });
   });
+  app.get("/api/directory", (req, res) => {
+    const conditions = [
+      "s.published=1",
+      "s.approval='approved'",
+      "b.status='active'",
+      "b.ends_at>?",
+      "u.disabled=0",
+    ];
+    const params = [Date.now()];
+    for (const field of ["province", "municipality", "neighborhood"])
+      if (req.query[field]) {
+        conditions.push("s." + field + "=?");
+        params.push(clean(req.query[field], 100));
+      }
+    if (req.query.q) {
+      conditions.push(
+        "(s.name LIKE ? ESCAPE '\\' OR s.description LIKE ? ESCAPE '\\')",
+      );
+      const term =
+        "%" +
+        clean(req.query.q, 100).replace(
+          /[\\%_]/g,
+          "\\  function publicSpace(slug) {",
+        ) +
+        "%";
+      params.push(term, term);
+    }
+    const from =
+      " FROM spaces s JOIN subscriptions b ON s.owner=b.user JOIN users u ON s.owner=u.id WHERE " +
+      conditions.join(" AND ");
+    const total = db.prepare("SELECT COUNT(*) AS n" + from).get(...params).n;
+    const page = Math.max(1, Math.min(10000, parseInt(req.query.page) || 1));
+    const spaces = db
+      .prepare(
+        "SELECT s.slug,s.name,s.description,s.logo,s.covers,s.province,s.municipality,s.neighborhood" +
+          from +
+          " ORDER BY s.province,s.municipality,s.neighborhood,s.name LIMIT 24 OFFSET ?",
+      )
+      .all(...params, (page - 1) * 24);
+    res.json({ spaces, total, page });
+  });
   function publicSpace(slug) {
     return db
       .prepare(
-        "SELECT s.id,s.slug,s.name,s.whatsapp,s.description,s.address,s.hours,s.logo,s.covers FROM spaces s JOIN subscriptions b ON s.owner=b.user JOIN users u ON s.owner=u.id WHERE s.slug=? AND s.published=1 AND s.approval='approved' AND b.status='active' AND b.ends_at>? AND u.disabled=0",
+        "SELECT s.id,s.slug,s.name,s.whatsapp,s.description,s.address,s.hours,s.logo,s.covers,s.province,s.municipality,s.neighborhood FROM spaces s JOIN subscriptions b ON s.owner=b.user JOIN users u ON s.owner=u.id WHERE s.slug=? AND s.published=1 AND s.approval='approved' AND b.status='active' AND b.ends_at>? AND u.disabled=0",
       )
       .get(slug, Date.now());
   }
@@ -1098,6 +1153,16 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
           .prepare("SELECT * FROM spaces WHERE id=?")
           .get(Number(req.params.id));
         if (!s) return fail(res, "Espaço não encontrado.", 404);
+        if (
+          s.approval !== "approved" &&
+          (!zones[s.province]?.includes(s.municipality) ||
+            s.neighborhood.trim().length < 2)
+        )
+          return fail(
+            res,
+            "Completa a província, município e bairro antes de aprovar o espaço.",
+            409,
+          );
         const covers = JSON.parse(s.covers || "[]");
         if (
           !s.logo ||
@@ -1399,6 +1464,7 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
       "/redefinir-senha",
       "/alterar-senha",
       "/assinatura",
+      "/espacos-de-alimentacao",
       "/demo",
       "/m/:slug",
       "/privacidade",

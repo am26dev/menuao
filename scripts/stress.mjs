@@ -111,6 +111,9 @@ await scenario(
         "/space",
         {
           name: "100 MISÉRIA " + i,
+          province: "Luanda",
+          municipality: "Talatona",
+          neighborhood: "Centro",
           slug: "stress-" + i,
           whatsapp: "+244 936479545",
           published: true,

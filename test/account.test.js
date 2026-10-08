@@ -242,6 +242,9 @@ test("Password recovery, temporary administrator and subscription periods", asyn
           assert.equal((await fetch(base + page)).status, 200);
         const payload = {
           name: "100 MISÉRIA",
+          province: "Luanda",
+          municipality: "Talatona",
+          neighborhood: "Centro",
           slug: "100miseria",
           whatsapp: "+244 936479545",
           address: "Talatona, Luanda",

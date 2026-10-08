@@ -67,6 +67,9 @@ test("Branding, moderated product photos, private proofs and notification emails
       "PUT",
       {
         name: "Teste visual",
+        province: "Luanda",
+        municipality: "Talatona",
+        neighborhood: "Centro",
         slug: "teste-visual",
         whatsapp: "936479545",
         published: true,
@@ -164,6 +167,68 @@ test("Branding, moderated product photos, private proofs and notification emails
       ).status,
       200,
     );
+    assert.equal((await request("/directory")).data.total, 0);
+    assert.equal(
+      (
+        await request(
+          "/space",
+          "PUT",
+          {
+            id,
+            name: "Espaço atualizado",
+            slug: "teste-visual",
+            whatsapp: "244923456789",
+            address: "Nova morada",
+            province: "Luanda",
+            municipality: "Talatona",
+            neighborhood: "Benfica",
+            published: true,
+          },
+          a.cookie,
+        )
+      ).status,
+      200,
+    );
+    assert.equal(
+      (await request("/me", "GET", undefined, a.cookie)).data.spaces[0]
+        .approval,
+      "approved",
+    );
+    assert.equal(
+      (
+        await request(
+          "/space",
+          "PUT",
+          {
+            id,
+            name: "Inválido",
+            slug: "teste-visual",
+            whatsapp: "244923456789",
+            province: "Cabinda",
+            municipality: "Talatona",
+            neighborhood: "Centro",
+          },
+          a.cookie,
+        )
+      ).status,
+      400,
+    );
+    assert.equal(
+      (
+        await request(
+          "/spaces/" + id + "/branding",
+          "PUT",
+          { logo: urls[0], covers: urls.slice(1) },
+          a.cookie,
+        )
+      ).status,
+      200,
+    );
+    assert.equal(
+      (await request("/me", "GET", undefined, a.cookie)).data.spaces[0]
+        .approval,
+      "approved",
+    );
     const subscription = await request(
       "/account/subscription-request",
       "POST",
@@ -221,6 +286,15 @@ test("Branding, moderated product photos, private proofs and notification emails
       ).status,
       200,
     );
+    const directory = await request(
+      "/directory?province=Luanda&municipality=Talatona&neighborhood=Benfica",
+    );
+    assert.equal(directory.status, 200);
+    assert.equal(directory.data.total, 1);
+    assert.equal(directory.data.spaces[0].slug, "teste-visual");
+    assert.equal(directory.data.spaces[0].email, undefined);
+    assert.equal((await request("/directory?province=Cabinda")).data.total, 0);
+    assert.equal((await request("/directory?q=%25")).data.total, 0);
     const menu = (await request("/menu/teste-visual")).data;
     assert.equal(menu.space.covers.length, 4);
     assert.equal(menu.space.logo, urls[0]);
