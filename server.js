@@ -405,13 +405,29 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
     next();
   }
   async function validPassword(user, p) {
-    return (
-      typeof p === "string" &&
-      p.length <= 128 &&
-      timingSafeEqual(
-        await derive(p, user?.salt || "dummy-salt", 64),
-        Buffer.from(user?.password || "0".repeat(128), "hex"),
-      )
+    if (typeof p !== "string" || p.length > 128) return false;
+    const matches = timingSafeEqual(
+      await derive(p, user?.salt || "dummy-salt", 64),
+      Buffer.from(user?.password || "0".repeat(128), "hex"),
+    );
+    if (!matches || !user) return false;
+    // Password hashing yields to other requests, including password resets and
+    // access changes. Never authenticate an account from an obsolete snapshot.
+    const current = db.prepare("SELECT * FROM users WHERE id=?").get(user.id);
+    return !!(
+      current &&
+      !current.disabled &&
+      current.activated &&
+      [
+        "password",
+        "salt",
+        "role",
+        "permissions",
+        "must_change_password",
+        "temporary_expires",
+        "mfa_enabled",
+        "mfa_secret",
+      ].every((field) => current[field] === user[field])
     );
   }
   async function reauth(req, res, next) {
@@ -461,6 +477,14 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
       : "";
   }
   function consumeMfa(user, code) {
+    // Login and reauthentication may have awaited scrypt since loading user.
+    // Read recovery codes again so concurrent requests cannot restore used ones.
+    user = db
+      .prepare(
+        "SELECT * FROM users WHERE id=? AND activated=1 AND disabled=0 AND mfa_enabled=1",
+      )
+      .get(user.id);
+    if (!user) return false;
     const counter = verifyTotp(
       decryptSecret(user.mfa_secret, mfaKey),
       code,
@@ -474,11 +498,10 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
     const codes = JSON.parse(user.recovery),
       h = hash(code.replace(/[-\s]/g, "").toLowerCase());
     if (!codes.includes(h)) return false;
-    db.prepare("UPDATE users SET recovery=? WHERE id=?").run(
-      JSON.stringify(codes.filter((x) => x !== h)),
-      user.id,
-    );
-    return true;
+    return !!db
+      .prepare("UPDATE users SET recovery=? WHERE id=? AND recovery=?")
+      .run(JSON.stringify(codes.filter((x) => x !== h)), user.id, user.recovery)
+      .changes;
   }
   app.get("/api/staff/mfa/setup", auth, (req, res) => {
     const user = db.prepare("SELECT * FROM users WHERE id=?").get(req.user.id);

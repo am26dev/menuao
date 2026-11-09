@@ -418,9 +418,15 @@ export function installAccountRoutes({
         db.exec("ROLLBACK");
         return fail(res, "Link inválido, expirado ou já utilizado.", 403);
       }
-      db.prepare(
-        "UPDATE users SET password=?,salt=?,must_change_password=0,temporary_expires=NULL WHERE id=?",
-      ).run(password, salt, row.id);
+      const changed = db
+        .prepare(
+          "UPDATE users SET password=?,salt=?,must_change_password=0,temporary_expires=NULL WHERE id=? AND password=? AND salt=? AND disabled=0 AND activated=1",
+        )
+        .run(password, salt, row.id, row.password, row.salt);
+      if (!changed.changes) {
+        db.exec("ROLLBACK");
+        return fail(res, "Link inválido, expirado ou já utilizado.", 403);
+      }
       db.prepare("DELETE FROM password_resets WHERE user=?").run(row.id);
       db.prepare("DELETE FROM sessions WHERE user=?").run(row.id);
       audit({ user: row }, "password.reset.completed", row.id);
@@ -446,15 +452,41 @@ export function installAccountRoutes({
       return fail(res, "Usa uma palavra-passe de 14 a 128 caracteres.");
     if (await validPassword(u, p))
       return fail(res, "Escolhe uma palavra-passe diferente da anterior.");
-    if (u.mfa_enabled && !consumeMfa(u, req.body.code))
-      return fail(res, "Código de autenticação inválido ou já utilizado.", 401);
     const salt = randomBytes(16).toString("hex"),
       password = (await derive(p, salt, 64)).toString("hex");
     db.exec("BEGIN IMMEDIATE");
     try {
-      db.prepare(
-        "UPDATE users SET password=?,salt=?,must_change_password=0,temporary_expires=NULL WHERE id=?",
-      ).run(password, salt, u.id);
+      // A reset or access change may finish while deriving the new password.
+      // Match the authenticated snapshot before changing credentials or sessions.
+      const changed = db
+        .prepare(
+          "UPDATE users SET password=?,salt=?,must_change_password=0,temporary_expires=NULL WHERE id=? AND password=? AND salt=? AND disabled=0 AND activated=1 AND mfa_enabled=? AND mfa_secret=?",
+        )
+        .run(
+          password,
+          salt,
+          u.id,
+          u.password,
+          u.salt,
+          u.mfa_enabled,
+          u.mfa_secret,
+        );
+      if (!changed.changes) {
+        db.exec("ROLLBACK");
+        return fail(
+          res,
+          "A conta foi alterada. Entra novamente para continuar.",
+          401,
+        );
+      }
+      if (u.mfa_enabled && !consumeMfa(u, req.body.code)) {
+        db.exec("ROLLBACK");
+        return fail(
+          res,
+          "Código de autenticação inválido ou já utilizado.",
+          401,
+        );
+      }
       db.prepare("DELETE FROM sessions WHERE user=?").run(u.id);
       db.prepare("DELETE FROM password_resets WHERE user=?").run(u.id);
       audit(req, "password.changed", u.id);
