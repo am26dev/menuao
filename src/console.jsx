@@ -1934,8 +1934,10 @@ function ProfileSecurity({ user, refresh }) {
       ) : (
         <>
           <p>
-            Protege a tua conta com um código da aplicação autenticadora. A
-            ativação é opcional.
+            Protege a tua conta com um código da aplicação autenticadora.
+            {user.role === "owner"
+              ? " A ativação é opcional."
+              : " A ativação é obrigatória para aceder à gestão Muds."}
           </p>
           <button className="btn" onClick={() => setSetup(true)}>
             Configurar autenticação de dois fatores
@@ -1978,6 +1980,8 @@ function Console() {
           ) : (
             <PasswordLink api={api} user={user} />
           )
+        ) : user.role !== "owner" && !user.mfa_enabled ? (
+          <MfaSetup api={api} onComplete={refresh} />
         ) : user.role === "owner" ? (
           location.pathname === "/assinatura" ? (
             <SubscriptionChoice user={user} refresh={refresh} />
