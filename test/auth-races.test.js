@@ -317,6 +317,58 @@ test("Authentication remains valid across concurrent account changes", async (t)
         );
       },
     );
+    await t.test("Logout cancels an in-flight account deletion", async () => {
+      db.exec("DELETE FROM limits");
+      const email = "logout-race@example.test";
+      const registered = await api("/register", { email, password });
+      assert.equal(registered.status, 200);
+      pauseChecks();
+      const pending = api("/account/delete", { password }, registered.cookie);
+      await checksReady(1);
+      assert.equal((await api("/logout", {}, registered.cookie)).status, 200);
+      resumeChecks();
+      assert.equal((await pending).status, 401);
+      assert.ok(db.prepare("SELECT id FROM users WHERE email=?").get(email));
+    });
+    await t.test(
+      "Deleting an MFA-protected account requires its second factor",
+      async () => {
+        db.exec("DELETE FROM limits");
+        const email = "delete-mfa@example.test";
+        const registered = await api("/register", { email, password });
+        const setup = await api(
+          "/staff/mfa/setup",
+          undefined,
+          registered.cookie,
+        );
+        const enabled = await api(
+          "/staff/mfa/enable",
+          { confirmationPassword: password, code: totp(setup.data.secret) },
+          registered.cookie,
+        );
+        assert.equal(enabled.status, 200);
+        assert.equal(
+          (await api("/account/delete", { password }, registered.cookie))
+            .status,
+          401,
+        );
+        assert.ok(db.prepare("SELECT id FROM users WHERE email=?").get(email));
+        assert.equal(
+          (
+            await api(
+              "/account/delete",
+              { password, code: enabled.data.recoveryCodes[0] },
+              registered.cookie,
+            )
+          ).status,
+          200,
+        );
+        assert.equal(
+          db.prepare("SELECT id FROM users WHERE email=?").get(email),
+          undefined,
+        );
+      },
+    );
   } finally {
     resumeChecks();
     db?.close();

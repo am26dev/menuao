@@ -1,7 +1,7 @@
 import multer from "multer";
 import sharp from "sharp";
 import { randomBytes } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, statfsSync } from "node:fs";
 import path from "node:path";
 export const bankDetails = {
   holder: "MUDS - PRESTAÇÃO DE SERVIÇOS E COMERCIO GERAL, LDA",
@@ -25,11 +25,15 @@ export function installCommerceRoutes({
   ownedSpace,
   safeImage,
   rate,
+  sessionCurrent,
 }) {
   const dir = path.join(dataDir, "receipts");
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   db.exec(
     "CREATE TABLE IF NOT EXISTS payment_proofs(id TEXT PRIMARY KEY,user INTEGER NOT NULL,request_id TEXT NOT NULL,filename TEXT NOT NULL,type TEXT NOT NULL,bytes INTEGER NOT NULL,bank_kind TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',note TEXT NOT NULL DEFAULT '',created_at INTEGER NOT NULL)",
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS payment_proofs_user_created ON payment_proofs(user,created_at DESC)",
   );
   app.get("/api/account/payment", auth, owner, (req, res) =>
     res.json({
@@ -109,6 +113,8 @@ export function installCommerceRoutes({
           return fail(res, "Comprovativo inválido. Usa PDF, JPG, PNG ou WebP.");
         }
       }
+      if (!sessionCurrent(req))
+        return fail(res, "A sessão terminou. Entra novamente.", 401);
       if (
         db
           .prepare(
@@ -121,6 +127,13 @@ export function installCommerceRoutes({
         return fail(res, "Limite de 100 MB de comprovativos por conta.", 413);
       const id = randomBytes(16).toString("hex"),
         filename = id + ext;
+      const disk = statfsSync(dir);
+      if (disk.bavail * disk.bsize < bytes.length + 128 * 1024 * 1024)
+        return fail(
+          res,
+          "O armazenamento está temporariamente indisponível. Contacta a Muds.",
+          507,
+        );
       writeFileSync(path.join(dir, filename), bytes, {
         flag: "wx",
         mode: 0o600,

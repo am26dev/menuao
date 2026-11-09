@@ -7,7 +7,10 @@
     "start": "node server.js",
     "test": "node --test",
     "build": "node --check server.js && node scripts/build.mjs",
-    "backup": "node scripts/backup.mjs"
+    "backup": "node scripts/backup.mjs",
+    "restore:check": "node scripts/restore-check.mjs",
+    "test:capacity": "node scripts/capacity-check.mjs",
+    "test:stress": "node scripts/stress.mjs"
   },
   "engines": {
     "node": ">=24"

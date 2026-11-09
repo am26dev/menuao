@@ -87,6 +87,7 @@ test("Platform security and commercial workflows", async (t) => {
       async () => {
         assert.equal((await request("/me")).status, 401);
         assert.equal((await request("/admin/overview")).status, 401);
+        assert.equal((await request("/admin/operations")).status, 401);
         assert.equal(
           (
             await request("/register", "POST", {
@@ -148,7 +149,7 @@ test("Platform security and commercial workflows", async (t) => {
         assert.equal(
           (await request("/admin/overview", "GET", undefined, admin.cookie))
             .status,
-          200,
+          403,
         );
         const adminMfa = (
           await request("/staff/mfa/setup", "GET", undefined, admin.cookie)
@@ -619,6 +620,11 @@ test("Platform security and commercial workflows", async (t) => {
           manager.cookie,
         );
         assert.equal(overview.status, 200);
+        assert.equal(
+          (await request("/admin/operations", "GET", undefined, manager.cookie))
+            .status,
+          403,
+        );
         assert.equal(overview.data.users.length, 0);
         assert.equal(overview.data.media.length, 0);
         assert.equal(overview.data.audit.length, 0);

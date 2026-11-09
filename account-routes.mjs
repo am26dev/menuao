@@ -22,6 +22,7 @@ export function installAccountRoutes({
   encryptSecret,
   decryptSecret,
   mfaKey,
+  sessionCurrent,
 }) {
   db.exec(
     "CREATE TABLE IF NOT EXISTS password_resets(token TEXT PRIMARY KEY,user INTEGER NOT NULL REFERENCES users(id),expires INTEGER NOT NULL)",
@@ -79,14 +80,20 @@ export function installAccountRoutes({
       .some((c) => c.name === "expires")
   )
     db.exec("ALTER TABLE email_jobs ADD COLUMN expires INTEGER");
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS email_jobs_queue ON email_jobs(status,next_at,id); CREATE INDEX IF NOT EXISTS resets_user ON password_resets(user); CREATE INDEX IF NOT EXISTS resets_expires ON password_resets(expires);",
+  );
   let sending = false;
   async function flushMail() {
     if (sending || (!mail && !testOutbox)) return;
     sending = true;
-    db.prepare(
-      "UPDATE email_jobs SET status='expired',text='' WHERE status='pending' AND expires IS NOT NULL AND expires<=?",
-    ).run(Date.now());
     try {
+      db.prepare(
+        "UPDATE email_jobs SET status='failed',text='' WHERE status='pending' AND attempts>=8",
+      ).run();
+      db.prepare(
+        "UPDATE email_jobs SET status='expired',text='' WHERE status='pending' AND expires IS NOT NULL AND expires<=?",
+      ).run(Date.now());
       for (const job of db
         .prepare(
           "SELECT * FROM email_jobs WHERE status='pending' AND next_at<=? AND attempts<8 ORDER BY id LIMIT 20",
@@ -148,91 +155,100 @@ export function installAccountRoutes({
   }
   app.use((req, res, next) => {
     res.on("finish", () => {
-      if (
-        !["POST", "PUT", "DELETE"].includes(req.method) ||
-        res.statusCode >= 400
-      )
-        return;
-      const actions = {
-        "/api/register":
-          "Bem-vindo ao Menu Online! A tua conta foi criada. Entra em " +
-          origin +
-          "/painel para configurar o teu estabelecimento.",
-        "/api/account/delete": "A tua conta foi eliminada da plataforma.",
-        "/api/space":
-          "As informações do teu estabelecimento foram atualizadas.",
-        "/api/products": "Um produto foi guardado na tua conta.",
-        "/api/account/subscription-request":
-          "O teu pedido de assinatura foi registado. Consulta " +
-          origin +
-          "/assinatura.",
-        "/api/account/payment-proof":
-          "O teu comprovativo foi recebido e aguarda verificação.",
-        "/api/account/mfa/disable":
-          "A autenticação de dois fatores foi desativada.",
-        "/api/staff/mfa/enable": "A autenticação de dois fatores foi ativada.",
-        "/api/account/password": "A tua palavra-passe foi alterada.",
-      };
-      const text =
-        actions[req.path] ||
-        (/^\/api\/spaces\/\d+\/branding$/.test(req.path)
-          ? "O logotipo e as capas do teu estabelecimento foram atualizados."
-          : null) ||
-        (req.method === "DELETE" && req.path.startsWith("/api/products/")
-          ? "Um produto foi eliminado da tua conta."
-          : null);
-      if (
-        !text &&
-        !/^\/api\/admin\/(spaces|subscriptions)\/\d+$/.test(req.path) &&
-        req.path !== "/api/admin/media"
-      )
-        return;
-      let email =
-        req.user?.email ||
-        (req.path === "/api/register"
-          ? String(req.body.email || "")
-              .trim()
-              .toLowerCase()
-          : null);
-      let details = text;
-      if (/^\/api\/admin\/subscriptions\/\d+$/.test(req.path)) {
-        email = db
-          .prepare("SELECT email FROM users WHERE id=?")
-          .get(Number(req.path.split("/").pop()))?.email;
-        details =
-          "O estado da tua assinatura foi atualizado pela Muds para: " +
-          req.body.status +
-          ". Consulta " +
-          origin +
-          "/assinatura.";
+      try {
+        if (
+          !["POST", "PUT", "DELETE"].includes(req.method) ||
+          res.statusCode >= 400
+        )
+          return;
+        const actions = {
+          "/api/register":
+            "Bem-vindo ao Menu Online! A tua conta foi criada. Entra em " +
+            origin +
+            "/painel para configurar o teu estabelecimento.",
+          "/api/account/delete": "A tua conta foi eliminada da plataforma.",
+          "/api/space":
+            "As informações do teu estabelecimento foram atualizadas.",
+          "/api/products": "Um produto foi guardado na tua conta.",
+          "/api/account/subscription-request":
+            "O teu pedido de assinatura foi registado. Consulta " +
+            origin +
+            "/assinatura.",
+          "/api/account/payment-proof":
+            "O teu comprovativo foi recebido e aguarda verificação.",
+          "/api/account/mfa/disable":
+            "A autenticação de dois fatores foi desativada.",
+          "/api/staff/mfa/enable":
+            "A autenticação de dois fatores foi ativada.",
+          "/api/account/password": "A tua palavra-passe foi alterada.",
+        };
+        const text =
+          actions[req.path] ||
+          (/^\/api\/spaces\/\d+\/branding$/.test(req.path)
+            ? "O logotipo e as capas do teu estabelecimento foram atualizados."
+            : null) ||
+          (req.method === "DELETE" && req.path.startsWith("/api/products/")
+            ? "Um produto foi eliminado da tua conta."
+            : null);
+        if (
+          !text &&
+          !/^\/api\/admin\/(spaces|subscriptions)\/\d+$/.test(req.path) &&
+          req.path !== "/api/admin/media"
+        )
+          return;
+        let email =
+          req.user?.email ||
+          (req.path === "/api/register"
+            ? String(req.body.email || "")
+                .trim()
+                .toLowerCase()
+            : null);
+        let details = text;
+        if (/^\/api\/admin\/subscriptions\/\d+$/.test(req.path)) {
+          email = db
+            .prepare("SELECT email FROM users WHERE id=?")
+            .get(Number(req.path.split("/").pop()))?.email;
+          details =
+            "O estado da tua assinatura foi atualizado pela Muds para: " +
+            req.body.status +
+            ". Consulta " +
+            origin +
+            "/assinatura.";
+        }
+        if (/^\/api\/admin\/spaces\/\d+$/.test(req.path)) {
+          email = db
+            .prepare(
+              "SELECT u.email FROM users u JOIN spaces s ON s.owner=u.id WHERE s.id=?",
+            )
+            .get(Number(req.path.split("/").pop()))?.email;
+          details =
+            "A revisão do teu estabelecimento foi atualizada: " +
+            req.body.approval +
+            ". Consulta o painel.";
+        }
+        if (req.path === "/api/admin/media") {
+          email = db
+            .prepare(
+              "SELECT u.email FROM users u JOIN media m ON m.owner=u.id WHERE m.url=?",
+            )
+            .get(req.body.url)?.email;
+          details =
+            "Uma fotografia da tua conta foi revista pela Muds: " +
+            req.body.status +
+            ".";
+        }
+        notify(
+          email,
+          req.path === "/api/register"
+            ? "Bem-vindo"
+            : "Confirmação de alteração",
+          details,
+        );
+      } catch {
+        console.error(
+          "Notification queue unavailable; check mail and storage status",
+        );
       }
-      if (/^\/api\/admin\/spaces\/\d+$/.test(req.path)) {
-        email = db
-          .prepare(
-            "SELECT u.email FROM users u JOIN spaces s ON s.owner=u.id WHERE s.id=?",
-          )
-          .get(Number(req.path.split("/").pop()))?.email;
-        details =
-          "A revisão do teu estabelecimento foi atualizada: " +
-          req.body.approval +
-          ". Consulta o painel.";
-      }
-      if (req.path === "/api/admin/media") {
-        email = db
-          .prepare(
-            "SELECT u.email FROM users u JOIN media m ON m.owner=u.id WHERE m.url=?",
-          )
-          .get(req.body.url)?.email;
-        details =
-          "Uma fotografia da tua conta foi revista pela Muds: " +
-          req.body.status +
-          ".";
-      }
-      notify(
-        email,
-        req.path === "/api/register" ? "Bem-vindo" : "Confirmação de alteração",
-        details,
-      );
     });
     next();
   });
@@ -306,6 +322,8 @@ export function installAccountRoutes({
         400,
       );
     }
+    if (!sessionCurrent(req))
+      return fail(res, "A sessão terminou. Entra novamente.", 401);
     db.prepare(
       "INSERT INTO mail_settings VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET username=excluded.username,password=excluded.password",
     ).run(username, encryptSecret(password, mfaKey));
@@ -457,6 +475,10 @@ export function installAccountRoutes({
     db.exec("BEGIN IMMEDIATE");
     try {
       // A reset or access change may finish while deriving the new password.
+      if (!sessionCurrent(req)) {
+        db.exec("ROLLBACK");
+        return fail(res, "A sessão terminou. Entra novamente.", 401);
+      }
       // Match the authenticated snapshot before changing credentials or sessions.
       const changed = db
         .prepare(

@@ -1120,6 +1120,7 @@ function Owner({ user, refresh }) {
               try {
                 await api("/account/delete", "POST", {
                   password: new FormData(e.currentTarget).get("password"),
+                  code: new FormData(e.currentTarget).get("code"),
                 });
                 location.href = "/";
               } catch (e) {
@@ -1135,6 +1136,15 @@ function Owner({ user, refresh }) {
               maxLength="128"
               autoComplete="current-password"
             />
+            {user.mfa_enabled ? (
+              <Field
+                label="Código da aplicação autenticadora ou de recuperação"
+                name="code"
+                required
+                autoComplete="one-time-code"
+                maxLength="40"
+              />
+            ) : null}
             <label className="checkbox-label">
               <input type="checkbox" required />
               Compreendo que a eliminação é permanente.
@@ -1144,6 +1154,55 @@ function Owner({ user, refresh }) {
         </section>
       ) : null}
     </>
+  );
+}
+function OperationalStatus() {
+  const [data, setData] = useState(null),
+    [error, setError] = useState("");
+  useEffect(() => {
+    let live = true;
+    api("/admin/operations")
+      .then((value) => {
+        if (live) setData(value);
+      })
+      .catch((error) => {
+        if (live) setError(error.message);
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+  return (
+    <section className="panel">
+      <h3>Cópias de segurança</h3>
+      {error ? (
+        <p role="alert">{error}</p>
+      ) : !data ? (
+        <p>A verificar as cópias…</p>
+      ) : (
+        <>
+          <p role="status">
+            {data.backup.running
+              ? "Cópia em curso."
+              : data.backup.ok && !data.backup.stale
+                ? "A última cópia completa passou a verificação de integridade."
+                : "É necessário verificar as cópias de segurança."}
+          </p>
+          <p>
+            Última cópia verificada:{" "}
+            {data.backup.lastSuccess
+              ? new Date(data.backup.lastSuccess).toLocaleString("pt-AO")
+              : "Ainda não confirmada"}
+            .
+          </p>
+          <p>
+            Estas cópias incluem a base de dados, imagens e comprovativos.
+            Mantém também uma cópia fora deste alojamento e a chave de
+            recuperação num local seguro.
+          </p>
+        </>
+      )}
+    </section>
   );
 }
 function MailSettings() {
@@ -1642,6 +1701,7 @@ function Staff({ user }) {
         <section className="panel">
           <h2>Equipa e acessos</h2>
           <MailSettings />
+          <OperationalStatus />
           <form
             onSubmit={(e) => {
               e.preventDefault();

@@ -2,6 +2,7 @@ import express from "express";
 import { installCommerceRoutes } from "./commerce-routes.mjs";
 import nodemailer from "nodemailer";
 import { installAccountRoutes } from "./account-routes.mjs";
+import { startOperations } from "./operations.mjs";
 import { DatabaseSync } from "node:sqlite";
 import { randomBytes, scrypt, timingSafeEqual, createHash } from "node:crypto";
 import { promisify } from "node:util";
@@ -12,6 +13,7 @@ import {
   unlinkSync,
   statSync,
   readFileSync,
+  statfsSync,
 } from "node:fs";
 import path from "node:path";
 import multer from "multer";
@@ -88,6 +90,9 @@ CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY,actor INTEGER,action TEX
 CREATE TABLE IF NOT EXISTS invites(token TEXT PRIMARY KEY,user INTEGER REFERENCES users(id),expires INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS spaces_owner ON spaces(owner); CREATE INDEX IF NOT EXISTS products_space ON products(space); CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user);
 INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner';`);
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS sessions_expires ON sessions(expires); CREATE INDEX IF NOT EXISTS limits_expires ON limits(expires); CREATE INDEX IF NOT EXISTS spaces_directory ON spaces(published,approval,province,municipality,neighborhood,name);",
+  );
   column(
     "subscriptions",
     "billing_cycle",
@@ -166,7 +171,20 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
     } catch {}
   }
   const hash = (t) => createHash("sha256").update(t).digest("hex"),
-    derive = promisify(scrypt);
+    scryptAsync = promisify(scrypt);
+  let passwordWork = 0;
+  async function derive(...args) {
+    if (passwordWork >= 32)
+      throw Object.assign(new Error("Authentication capacity reached"), {
+        code: "AUTH_BUSY",
+      });
+    passwordWork++;
+    try {
+      return await scryptAsync(...args);
+    } finally {
+      passwordWork--;
+    }
+  }
   const clean = (v, max = 200) =>
     typeof v === "string" ? v.trim().slice(0, max) : "";
   // One-time repair for previously hidden, decoded photos of approved venues.
@@ -301,6 +319,11 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
     }),
   );
   app.use(express.json({ limit: "32kb", strict: true }));
+  app.use((req, res, next) => {
+    req.body ??= {};
+    if (Array.isArray(req.body)) return fail(res, "Pedido inválido.", 400);
+    next();
+  });
   app.use("/api", (req, res, next) => {
     res.set("Cache-Control", "no-store");
     if (!["GET", "HEAD"].includes(req.method)) {
@@ -346,6 +369,27 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
     req.user = user;
     next();
   }
+  function sessionCurrent(req) {
+    if (!req.user) return false;
+    const current = db
+      .prepare(
+        "SELECT u.* FROM sessions s JOIN users u ON s.user=u.id WHERE s.token=? AND s.expires>? AND u.disabled=0 AND u.activated=1",
+      )
+      .get(hash(cookieToken(req)), Date.now());
+    return (
+      !!current &&
+      current.id === req.user.id &&
+      [
+        "role",
+        "mfa_enabled",
+        "must_change_password",
+        "temporary_expires",
+      ].every((field) => current[field] === req.user[field]) &&
+      JSON.stringify(JSON.parse(current.permissions)) ===
+        JSON.stringify(req.user.permissions) &&
+      (!current.must_change_password || current.temporary_expires >= Date.now())
+    );
+  }
   const owner = (req, res, next) =>
     req.user.role === "owner"
       ? next()
@@ -353,7 +397,13 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
   const staff = (req, res, next) =>
     !["admin", "manager"].includes(req.user.role)
       ? fail(res, "Acesso reservado à equipa Muds.", 403)
-      : next();
+      : !req.user.mfa_enabled
+        ? fail(
+            res,
+            "Ativa a autenticação em dois passos antes de aceder à gestão.",
+            403,
+          )
+        : next();
   const admin = (req, res, next) =>
     req.user.role === "admin"
       ? next()
@@ -449,6 +499,8 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
       ).run(key, now + 900000);
       return fail(res, "Confirma a tua palavra-passe para esta operação.", 401);
     }
+    if (!sessionCurrent(req))
+      return fail(res, "A sessão terminou. Entra novamente.", 401);
     db.prepare("DELETE FROM limits WHERE key=?").run(key);
     next();
   }
@@ -575,6 +627,7 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
     encryptSecret,
     decryptSecret,
     mfaKey,
+    sessionCurrent,
   });
   installCommerceRoutes({
     app,
@@ -589,7 +642,9 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
     ownedSpace,
     safeImage,
     rate,
+    sessionCurrent,
   });
+  startOperations({ app, dataDir, auth, staff, admin, production });
   app.post("/api/register", rate, async (req, res) => {
     const email = clean(req.body.email, 254).toLowerCase(),
       password = req.body.password;
@@ -774,11 +829,21 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
     const user = db.prepare("SELECT * FROM users WHERE id=?").get(req.user.id);
     if (!(await validPassword(user, req.body.password)))
       return fail(res, "Palavra-passe incorreta.", 401);
+    if (!sessionCurrent(req))
+      return fail(res, "A sessão terminou. Entra novamente.", 401);
     const receiptFiles = db
       .prepare("SELECT filename FROM payment_proofs WHERE user=?")
       .all(user.id);
     db.exec("BEGIN IMMEDIATE");
     try {
+      if (user.mfa_enabled && !consumeMfa(user, req.body.code)) {
+        db.exec("ROLLBACK");
+        return fail(
+          res,
+          "Confirma a eliminação com o código de autenticação.",
+          401,
+        );
+      }
       db.prepare("DELETE FROM payment_proofs WHERE user=?").run(user.id);
       db.prepare("DELETE FROM email_jobs WHERE recipient=?").run(user.email);
       db.prepare(
@@ -863,6 +928,8 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
       }
       if (bytes.length > 1024 * 1024)
         return fail(res, "A fotografia deve ter no máximo 1 MB.", 413);
+      if (!sessionCurrent(req))
+        return fail(res, "A sessão terminou. Entra novamente.", 401);
       const used = db
         .prepare(
           "SELECT COALESCE(SUM(bytes),0) AS bytes FROM media WHERE owner=?",
@@ -873,6 +940,13 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
       const name =
           req.user.id + "-" + randomBytes(16).toString("hex") + ".webp",
         url = "/uploads/" + name;
+      const disk = statfsSync(uploadsDir);
+      if (disk.bavail * disk.bsize < bytes.length + 128 * 1024 * 1024)
+        return fail(
+          res,
+          "O armazenamento está temporariamente indisponível. Contacta a Muds.",
+          507,
+        );
       writeFileSync(path.join(uploadsDir, name), bytes, {
         flag: "wx",
         mode: 0o600,
@@ -1054,12 +1128,7 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
         "(s.name LIKE ? ESCAPE '\\' OR s.description LIKE ? ESCAPE '\\')",
       );
       const term =
-        "%" +
-        clean(req.query.q, 100).replace(
-          /[\\%_]/g,
-          "\\  function publicSpace(slug) {",
-        ) +
-        "%";
+        "%" + clean(req.query.q, 100).replace(/[\\%_]/g, "\\$&") + "%";
       params.push(term, term);
     }
     const from =
@@ -1501,6 +1570,20 @@ INSERT OR IGNORE INTO subscriptions(user) SELECT id FROM users WHERE role='owner
   app.use("/api", (req, res) => fail(res, "Recurso não encontrado.", 404));
   app.use((err, req, res, next) => {
     console.error("Request failed:", err.name);
+    if (err.code === "AUTH_BUSY") {
+      res.set("Retry-After", "5");
+      return fail(
+        res,
+        "O serviço está ocupado. Tenta novamente dentro de alguns segundos.",
+        503,
+      );
+    }
+    if (["ENOSPC", "EDQUOT"].includes(err.code) || err.errcode === 13)
+      return fail(
+        res,
+        "O armazenamento está temporariamente indisponível. Contacta a Muds.",
+        507,
+      );
     if (err instanceof multer.MulterError)
       return fail(res, "Usa uma fotografia JPG, PNG ou WebP de até 1 MB.", 413);
     if (err.type === "entity.too.large")

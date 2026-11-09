@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import sharp from "sharp";
 import { readFileSync } from "node:fs";
+import { totp } from "../security.mjs";
 test("Branding, moderated product photos, private proofs and notification emails", async () => {
   const data = mkdtempSync(path.join(tmpdir(), "menuao-commerce-"));
   const base = "http://127.0.0.1:3107",
@@ -62,6 +63,26 @@ test("Branding, moderated product photos, private proofs and notification emails
       email: "muaza.alfredo@gmail.com",
       password,
     });
+    const adminSetup = await request(
+      "/staff/mfa/setup",
+      "GET",
+      undefined,
+      admin.cookie,
+    );
+    assert.equal(
+      (
+        await request(
+          "/staff/mfa/enable",
+          "POST",
+          {
+            confirmationPassword: password,
+            code: totp(adminSetup.data.secret),
+          },
+          admin.cookie,
+        )
+      ).status,
+      200,
+    );
     await request(
       "/space",
       "PUT",

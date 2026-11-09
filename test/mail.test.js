@@ -11,7 +11,10 @@ test("Mail settings verify TLS credentials, encrypt secrets and restore after re
     "CREATE TABLE users(id INTEGER PRIMARY KEY,email TEXT,activated INTEGER,disabled INTEGER); CREATE TABLE limits(key TEXT PRIMARY KEY,count INTEGER,expires INTEGER);",
   );
   let verified = 0,
-    reject = false;
+    reject = false,
+    active = true,
+    hold = false,
+    release;
   const options = [],
     key = Buffer.alloc(32, 3),
     password = "SMTP-test-only-password!";
@@ -21,6 +24,10 @@ test("Mail settings verify TLS credentials, encrypt secrets and restore after re
       return {
         async verify() {
           verified++;
+          if (hold)
+            await new Promise((resolve) => {
+              release = resolve;
+            });
           if (reject) throw Error("authentication");
         },
       };
@@ -44,6 +51,7 @@ test("Mail settings verify TLS credentials, encrypt secrets and restore after re
       reauth: (req, res, next) => next(),
       fail: (res, error, status = 400) => res.status(status).json({ error }),
       audit: () => {},
+      sessionCurrent: () => active,
       hash: (t) => createHash("sha256").update(t).digest("hex"),
     });
     return app.listen(0, "127.0.0.1");
@@ -90,6 +98,21 @@ test("Mail settings verify TLS credentials, encrypt secrets and restore after re
       400,
     );
     assert.deepEqual(db.prepare("SELECT * FROM mail_settings").get(), saved);
+    reject = false;
+    hold = true;
+    const pending = put({
+      username: "late@menuao.online",
+      smtpPassword: password,
+    });
+    for (let n = 0; n < 100 && !release; n++)
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.ok(release, "SMTP check did not start");
+    active = false;
+    release();
+    assert.equal((await pending).status, 401);
+    assert.deepEqual(db.prepare("SELECT * FROM mail_settings").get(), saved);
+    active = true;
+    hold = false;
     await new Promise((r) => server.close(r));
     server = create();
     await new Promise((r) => server.once("listening", r));

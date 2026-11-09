@@ -81,6 +81,30 @@ test("Optional MFA for establishment accounts", async () => {
     assert.equal(admin.data.role, "admin");
     assert.equal(
       (await request("/admin/overview", "GET", undefined, admin.cookie)).status,
+      403,
+    );
+    const adminSetup = await request(
+      "/staff/mfa/setup",
+      "GET",
+      undefined,
+      admin.cookie,
+    );
+    assert.equal(
+      (
+        await request(
+          "/staff/mfa/enable",
+          "POST",
+          {
+            confirmationPassword: password,
+            code: totp(adminSetup.data.secret),
+          },
+          admin.cookie,
+        )
+      ).status,
+      200,
+    );
+    assert.equal(
+      (await request("/admin/overview", "GET", undefined, admin.cookie)).status,
       200,
     );
     const setup = await request("/staff/mfa/setup", "GET", undefined, b.cookie);
